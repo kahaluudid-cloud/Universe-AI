@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { Link } from "wouter";
-import { Home, LogIn, Settings, Bell, Sun, Moon, Languages, X, Trash2, CheckCheck } from "lucide-react";
+import { Home, LogIn, Settings, Bell, Sun, Moon, Languages, X, Trash2, CheckCheck, Key, CheckCircle2, AlertCircle, Loader2, ShieldCheck, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -110,6 +110,138 @@ function NotificationPanel({ open, onClose }: { open: boolean; onClose: () => vo
   );
 }
 
+type KeyStatus = { ok: boolean; latency: number; error?: string } | null;
+
+interface KeyReport {
+  summary: { total: number; healthy: number; mode: string };
+  keys: Record<string, { configured: boolean; ok?: boolean; latency?: number; error?: string }>;
+}
+
+function KeyHealthPanel() {
+  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<KeyReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const runCheck = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const res = await fetch(`${base}/api/health/keys/health`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: KeyReport = await res.json();
+      setReport(data);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const KEY_LABELS: Record<string, { label: string; color: string }> = {
+    GEMINI_KEY_1: { label: "Gemini Key 1", color: "#4285f4" },
+    GEMINI_KEY_2: { label: "Gemini Key 2", color: "#4285f4" },
+    GEMINI_KEY_3: { label: "Gemini Key 3", color: "#4285f4" },
+    GROQ_KEY_1: { label: "Groq Key 1", color: "#f97316" },
+    GROQ_KEY_2: { label: "Groq Key 2", color: "#f97316" },
+    GROQ_KEY_3: { label: "Groq Key 3", color: "#f97316" },
+    HF_TOKEN: { label: "HuggingFace", color: "#fbbf24" },
+  };
+
+  return (
+    <div className="border-t border-border pt-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-white flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-400" /> AI Key Health
+        </label>
+        {report && (
+          <Badge
+            variant="outline"
+            className={`text-[10px] h-4 px-1.5 ${
+              report.summary.healthy === report.summary.total && report.summary.total > 0
+                ? "border-emerald-500/30 text-emerald-400"
+                : report.summary.healthy > 0
+                ? "border-yellow-500/30 text-yellow-400"
+                : "border-red-500/30 text-red-400"
+            }`}
+          >
+            {report.summary.healthy}/{report.summary.total} OK
+          </Badge>
+        )}
+      </div>
+
+      {report && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 py-1.5 px-2 rounded-md bg-emerald-500/10 border border-emerald-500/20">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="text-xs text-emerald-300 font-medium">Replit AI — Primary (Always Active)</span>
+          </div>
+          {Object.entries(report.keys).map(([k, val]) => {
+            const meta = KEY_LABELS[k] ?? { label: k, color: "#888" };
+            return (
+              <div
+                key={k}
+                className={`flex items-center gap-2 py-1.5 px-2 rounded-md border ${
+                  !val.configured
+                    ? "bg-white/3 border-border opacity-50"
+                    : val.ok
+                    ? "bg-emerald-500/5 border-emerald-500/20"
+                    : "bg-red-500/5 border-red-500/20"
+                }`}
+              >
+                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: val.configured ? meta.color : "#555" }} />
+                <span className="text-xs text-white flex-1 truncate">{meta.label}</span>
+                {!val.configured && <span className="text-[10px] text-muted-foreground">Not set</span>}
+                {val.configured && val.ok && (
+                  <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">
+                    <CheckCircle2 className="w-2.5 h-2.5" /> {val.latency}ms
+                  </span>
+                )}
+                {val.configured && !val.ok && (
+                  <span className="text-[10px] text-red-400 flex items-center gap-0.5">
+                    <AlertCircle className="w-2.5 h-2.5" /> Error
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          <p className={`text-[10px] text-center mt-1 ${report.summary.mode === "hybrid" ? "text-emerald-400" : "text-muted-foreground"}`}>
+            {report.summary.mode === "hybrid"
+              ? `✓ Hybrid mode — ${report.summary.total} backup key${report.summary.total !== 1 ? "s" : ""} in pool`
+              : "Primary-only mode — add keys for failover"}
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-2 py-1.5">
+          {error}
+        </p>
+      )}
+
+      <Button
+        size="sm"
+        variant="outline"
+        className="w-full gap-2 text-xs h-8 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
+        onClick={runCheck}
+        disabled={loading}
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+        {loading ? "Testing all keys..." : "Run Health Check"}
+      </Button>
+
+      <div className="rounded-lg bg-white/3 border border-border p-2.5 space-y-1">
+        <p className="text-[10px] font-medium text-muted-foreground">Add your free API keys as secrets:</p>
+        {["GEMINI_KEY_1", "GEMINI_KEY_2", "GEMINI_KEY_3", "GROQ_KEY_1", "GROQ_KEY_2", "GROQ_KEY_3", "HF_TOKEN"].map(k => (
+          <p key={k} className="text-[10px] font-mono text-primary/70">{k}</p>
+        ))}
+        <p className="text-[10px] text-muted-foreground mt-1">Get free keys: Google AI Studio · Groq Cloud · HuggingFace</p>
+      </div>
+    </div>
+  );
+}
+
 function SettingsSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { brightness, setBrightness, language, setLanguage, theme, setTheme } = useSettings();
 
@@ -194,6 +326,8 @@ function SettingsSidebar({ open, onClose }: { open: boolean; onClose: () => void
               ))}
             </div>
           </div>
+
+          <KeyHealthPanel />
 
           <div className="pt-2 border-t border-border space-y-2">
             <p className="text-xs text-muted-foreground">About</p>
