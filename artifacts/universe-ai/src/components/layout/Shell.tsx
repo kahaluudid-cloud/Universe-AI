@@ -1,20 +1,16 @@
 import React, { useState } from "react";
 import { Link } from "wouter";
-import { Settings, HelpCircle, LogIn, Home } from "lucide-react";
+import { Home, LogIn, Settings, Bell, Sun, Moon, Languages, X, Trash2, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
+import { Badge } from "@/components/ui/badge";
+import { useNotifications } from "@/contexts/notifications";
+import { useSettings } from "@/contexts/settings";
 
-interface ShellProps {
-  children: React.ReactNode;
-}
+interface ShellProps { children: React.ReactNode; }
 
 function HelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [name, setName] = useState("");
@@ -27,12 +23,7 @@ function HelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const body = encodeURIComponent(`Name: ${name}\n\nMessage:\n${message}`);
     window.open(`mailto:mk119151580@gmail.com?subject=${subject}&body=${body}`, "_blank");
     setSent(true);
-    setTimeout(() => {
-      setSent(false);
-      setName("");
-      setMessage("");
-      onClose();
-    }, 2000);
+    setTimeout(() => { setSent(false); setName(""); setMessage(""); onClose(); }, 2000);
   };
 
   return (
@@ -41,44 +32,198 @@ function HelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
         <DialogHeader>
           <DialogTitle className="text-white">Help & Contact</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Send a message directly to Manish Kumar Chaturvedi — Universe AI founder.
+            Send a message to Manish Kumar Chaturvedi — Universe AI founder.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-2">
-          <Input
-            placeholder="Your name (optional)"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            className="bg-background border-border text-white"
-          />
-          <Textarea
-            placeholder="Describe your issue or feedback..."
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            className="min-h-[120px] bg-background border-border text-white resize-none"
-          />
-          <Button
-            onClick={handleSend}
-            disabled={!message.trim() || sent}
-            className="w-full"
-          >
+          <Input placeholder="Your name (optional)" value={name} onChange={e => setName(e.target.value)} className="bg-background border-border text-white" />
+          <Textarea placeholder="Describe your issue or feedback..." value={message} onChange={e => setMessage(e.target.value)} className="min-h-[120px] bg-background border-border text-white resize-none" />
+          <Button onClick={handleSend} disabled={!message.trim() || sent} className="w-full">
             {sent ? "Opening your email app..." : "Send Message"}
           </Button>
-          <p className="text-xs text-muted-foreground text-center">
-            Will open your email app · mk119151580@gmail.com
-          </p>
+          <p className="text-xs text-muted-foreground text-center">Will open your email app · mk119151580@gmail.com</p>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
+function NotificationPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { notifications, markAllRead, clearAll } = useNotifications();
+
+  const typeIcon = (type: string) => {
+    if (type === "build") return "🏗";
+    if (type === "complete") return "✅";
+    return "ℹ️";
+  };
+
+  const timeAgo = (date: Date) => {
+    const s = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="absolute top-14 right-24 w-80 z-50 bg-card border border-border rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <span className="text-sm font-semibold text-white">Notifications</span>
+        <div className="flex gap-2">
+          {notifications.length > 0 && (
+            <>
+              <button onClick={markAllRead} className="text-xs text-muted-foreground hover:text-white flex items-center gap-1">
+                <CheckCheck className="w-3 h-3" /> Mark read
+              </button>
+              <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-red-400 flex items-center gap-1">
+                <Trash2 className="w-3 h-3" /> Clear
+              </button>
+            </>
+          )}
+          <button onClick={onClose}><X className="w-4 h-4 text-muted-foreground hover:text-white" /></button>
+        </div>
+      </div>
+      <div className="max-h-80 overflow-y-auto">
+        {notifications.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">
+            <Bell className="w-6 h-6 mx-auto mb-2 opacity-30" />
+            No notifications yet
+          </div>
+        ) : (
+          notifications.map(n => (
+            <div key={n.id} className={`flex gap-3 px-4 py-3 border-b border-border/50 transition-colors ${n.read ? "opacity-60" : "bg-primary/5"}`}>
+              <span className="text-lg mt-0.5">{typeIcon(n.type)}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-white">{n.title}</span>
+                  <span className="text-[10px] text-muted-foreground ml-2 shrink-0">{timeAgo(n.timestamp)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{n.message}</p>
+              </div>
+              {!n.read && <div className="w-2 h-2 rounded-full bg-primary shrink-0 mt-1.5" />}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SettingsSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { brightness, setBrightness, language, setLanguage, theme, setTheme } = useSettings();
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="w-80 bg-card border-l border-border h-full overflow-y-auto shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Settings className="w-4 h-4 text-primary" />
+            <span className="font-semibold text-white">Settings</span>
+          </div>
+          <button onClick={onClose}><X className="w-5 h-5 text-muted-foreground hover:text-white" /></button>
+        </div>
+
+        <div className="p-5 space-y-7">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-white flex items-center gap-2">
+                <Sun className="w-4 h-4 text-yellow-400" /> Brightness
+              </label>
+              <span className="text-xs text-muted-foreground tabular-nums">{brightness}%</span>
+            </div>
+            <Slider
+              value={[brightness]}
+              onValueChange={([v]) => setBrightness(v)}
+              min={30}
+              max={130}
+              step={5}
+              className="w-full"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>Dim</span><span>Normal</span><span>Bright</span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium text-white flex items-center gap-2">
+              <Moon className="w-4 h-4 text-indigo-400" /> Theme
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {(["dark", "light"] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTheme(t)}
+                  className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm transition-all ${
+                    theme === t
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:text-white hover:border-white/30"
+                  }`}
+                >
+                  {t === "dark" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                  {t === "dark" ? "Dark" : "Light"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium text-white flex items-center gap-2">
+              <Languages className="w-4 h-4 text-green-400" /> Language
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { id: "en" as const, label: "English", sub: "English" },
+                { id: "hi" as const, label: "हिंदी", sub: "Hindi" },
+              ]).map(l => (
+                <button
+                  key={l.id}
+                  onClick={() => setLanguage(l.id)}
+                  className={`flex flex-col items-center p-3 rounded-lg border text-sm transition-all ${
+                    language === l.id
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:text-white hover:border-white/30"
+                  }`}
+                >
+                  <span className="text-lg font-bold">{l.label}</span>
+                  <span className="text-[10px] mt-0.5 opacity-70">{l.sub}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-border space-y-2">
+            <p className="text-xs text-muted-foreground">About</p>
+            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 space-y-1">
+              <p className="text-xs font-semibold text-primary">Universe AI</p>
+              <p className="text-xs text-muted-foreground">India's Universal AI Platform</p>
+              <p className="text-xs text-muted-foreground">By Manish Kumar Chaturvedi</p>
+              <p className="text-xs text-muted-foreground">Oteband, Balod, Chhattisgarh · © 2026</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Shell({ children }: ShellProps) {
   const [helpOpen, setHelpOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { hasUnread, markAllRead } = useNotifications();
+
+  const handleBellClick = () => {
+    setNotifOpen(v => !v);
+    if (!notifOpen) markAllRead();
+  };
 
   return (
     <div className="min-h-screen flex flex-col cosmic-bg text-foreground">
-      <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-background/60 backdrop-blur-md">
+      <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-background/60 backdrop-blur-md">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2 group">
@@ -87,38 +232,43 @@ export function Shell({ children }: ShellProps) {
               </div>
               <span className="font-bold text-xl tracking-tight text-white">Universe AI</span>
             </Link>
-
             <Link href="/">
               <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-white hidden sm:flex">
-                <Home className="h-4 w-4" />
-                Home
+                <Home className="h-4 w-4" /> Home
               </Button>
             </Link>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-2 text-muted-foreground hover:text-white"
-              onClick={() => setHelpOpen(true)}
-            >
-              <HelpCircle className="h-4 w-4" />
-              <span className="hidden sm:inline">Help</span>
-            </Button>
+          <div className="flex items-center gap-1 relative">
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative text-muted-foreground hover:text-white"
+                onClick={handleBellClick}
+              >
+                <Bell className="h-5 w-5" />
+                {hasUnread && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                )}
+              </Button>
+              <NotificationPanel open={notifOpen} onClose={() => setNotifOpen(false)} />
+            </div>
 
             <Button
               variant="ghost"
               size="icon"
               className="text-muted-foreground hover:text-white"
+              onClick={() => setSettingsOpen(true)}
             >
               <Settings className="h-5 w-5" />
             </Button>
 
             <Button
               size="sm"
-              className="gap-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hidden sm:flex"
+              className="gap-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hidden sm:flex ml-1"
               variant="outline"
+              onClick={() => setHelpOpen(true)}
             >
               <LogIn className="h-4 w-4" />
               Google Login
@@ -132,6 +282,7 @@ export function Shell({ children }: ShellProps) {
       </main>
 
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <SettingsSidebar open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

@@ -28,6 +28,7 @@ import { type ChatMessage } from "@/hooks/use-chat-stream";
 import { MessageContent } from "@/components/chat/ChatInterface";
 import { downloadAsPdf } from "@/lib/download-pdf";
 import { downloadAsPpt } from "@/lib/download-ppt";
+import { useNotifications } from "@/contexts/notifications";
 
 const MODELS = [
   { id: "gpt", name: "ChatGPT", label: "OpenAI GPT-5.4", color: "#10a37f", icon: "G", tag: "Smart" },
@@ -191,6 +192,7 @@ export default function Sarathi() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [selectedModel, setSelectedModel] = useState(MODELS[0]);
+  const { addNotification } = useNotifications();
 
   const conversationId = match && params?.id ? parseInt(params.id, 10) : undefined;
 
@@ -209,11 +211,21 @@ export default function Sarathi() {
 
   const handleDownloadPdf = useCallback((content: string) => {
     downloadAsPdf(content, "sarathi-textbook");
-  }, []);
+    addNotification({
+      type: "complete",
+      title: "Sarathi — Textbook Ready",
+      message: "HTML file downloaded. Open it in browser and press Ctrl+P to save as PDF with full Hindi support.",
+    });
+  }, [addNotification]);
 
   const handleDownloadPpt = useCallback((content: string) => {
     downloadAsPpt(content, "sarathi-presentation");
-  }, []);
+    addNotification({
+      type: "complete",
+      title: "Sarathi — Presentation Ready",
+      message: "Presentation downloaded. Open the HTML file in any browser — use arrow keys to navigate slides.",
+    });
+  }, [addNotification]);
 
   const messageRenderer = useCallback(
     (msg: ChatMessage, brandBgClass: string) =>

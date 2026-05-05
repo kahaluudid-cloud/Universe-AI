@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect } from "react";
+import { NotificationsProvider } from "@/contexts/notifications";
+import { SettingsProvider } from "@/contexts/settings";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/Dashboard";
 import Sarathi from "@/pages/Sarathi";
@@ -12,10 +14,7 @@ import Activity from "@/pages/Activity";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: false,
-      refetchOnWindowFocus: false,
-    },
+    queries: { retry: false, refetchOnWindowFocus: false },
   },
 });
 
@@ -36,19 +35,22 @@ function Router() {
 }
 
 function App() {
-  // Force dark mode
   useEffect(() => {
     document.documentElement.classList.add("dark");
   }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
+      <SettingsProvider>
+        <NotificationsProvider>
+          <TooltipProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <Router />
+            </WouterRouter>
+            <Toaster />
+          </TooltipProvider>
+        </NotificationsProvider>
+      </SettingsProvider>
     </QueryClientProvider>
   );
 }

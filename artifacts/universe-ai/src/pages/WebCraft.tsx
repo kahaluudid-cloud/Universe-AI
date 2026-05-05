@@ -14,6 +14,7 @@ import { type ChatMessage } from "@/hooks/use-chat-stream";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import JSZip from "jszip";
+import { useNotifications } from "@/contexts/notifications";
 
 interface ProjectFile {
   name: string;
@@ -190,6 +191,7 @@ export default function WebCraft() {
   const conversationId = match && params?.id ? parseInt(params.id, 10) : undefined;
 
   const createConversation = useCreateOpenaiConversation();
+  const { addNotification } = useNotifications();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [showCode, setShowCode] = useState(false);
@@ -213,20 +215,28 @@ export default function WebCraft() {
       if (msgFiles.length > 0) {
         const desc = stripCodeBlocks(lastMsg.content);
         const shortDesc = desc.split("\n")[0]?.slice(0, 80) || `Build v${versions.length + 1}`;
-        setVersions(prev => [
-          ...prev,
-          {
-            version: prev.length + 1,
-            timestamp: new Date(),
-            files: msgFiles,
-            description: shortDesc || `Build v${prev.length + 1}`,
-          },
-        ]);
+        setVersions(prev => {
+          const vNum = prev.length + 1;
+          addNotification({
+            type: "build",
+            title: "WebCraft Build Complete",
+            message: `v${vNum} · ${msgFiles.length} file${msgFiles.length !== 1 ? "s" : ""} generated — ${msgFiles.map(f => f.name).join(", ")}`,
+          });
+          return [
+            ...prev,
+            {
+              version: vNum,
+              timestamp: new Date(),
+              files: msgFiles,
+              description: shortDesc || `Build v${vNum}`,
+            },
+          ];
+        });
         setRestoredFiles(null);
       }
       lastVersionCount.current = assistantMsgs.length;
     }
-  }, [messages]);
+  }, [messages, addNotification]);
 
   useEffect(() => {
     if (showLive && previewRef.current && previewHtml) {
