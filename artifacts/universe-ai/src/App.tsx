@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect } from "react";
 import { NotificationsProvider } from "@/contexts/notifications";
 import { SettingsProvider } from "@/contexts/settings";
+import { CreativityStoreProvider } from "@/contexts/creativity-store";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/Dashboard";
 import Sarathi from "@/pages/Sarathi";
@@ -42,6 +43,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <SettingsProvider>
+        <CreativityStoreProvider>
         <NotificationsProvider>
           <TooltipProvider>
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
@@ -50,6 +52,7 @@ function App() {
             <Toaster />
           </TooltipProvider>
         </NotificationsProvider>
+        </CreativityStoreProvider>
       </SettingsProvider>
     </QueryClientProvider>
   );

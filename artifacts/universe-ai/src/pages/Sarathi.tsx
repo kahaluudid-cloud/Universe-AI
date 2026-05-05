@@ -29,6 +29,7 @@ import { MessageContent } from "@/components/chat/ChatInterface";
 import { downloadAsPdf } from "@/lib/download-pdf";
 import { downloadAsPpt } from "@/lib/download-ppt";
 import { useNotifications } from "@/contexts/notifications";
+import { useCreativityStore } from "@/contexts/creativity-store";
 
 const MODELS = [
   { id: "gpt", name: "ChatGPT", label: "OpenAI GPT-5.4", color: "#10a37f", icon: "G", tag: "Smart" },
@@ -193,6 +194,7 @@ export default function Sarathi() {
   const queryClient = useQueryClient();
   const [selectedModel, setSelectedModel] = useState(MODELS[0]);
   const { addNotification } = useNotifications();
+  const { addItem: addCreativityItem } = useCreativityStore();
 
   const conversationId = match && params?.id ? parseInt(params.id, 10) : undefined;
 
@@ -211,21 +213,39 @@ export default function Sarathi() {
 
   const handleDownloadPdf = useCallback((content: string) => {
     downloadAsPdf(content, "sarathi-textbook");
+    const wordCount = content.split(/\s+/).length;
+    const firstLine = content.split("\n").find(l => l.startsWith("# "))?.slice(2).trim() || "Sarathi Textbook";
     addNotification({
       type: "complete",
       title: "Sarathi — Textbook Ready",
       message: "HTML file downloaded. Open it in browser and press Ctrl+P to save as PDF with full Hindi support.",
     });
-  }, [addNotification]);
+    addCreativityItem({
+      type: "textbook",
+      title: firstLine,
+      wordCount,
+      downloadContent: content,
+      downloadFilename: "sarathi-textbook",
+    });
+  }, [addNotification, addCreativityItem]);
 
   const handleDownloadPpt = useCallback((content: string) => {
     downloadAsPpt(content, "sarathi-presentation");
+    const slideCount = (content.match(/^##\s+slide\s+\d+/gim) || []).length;
+    const firstLine = content.split("\n").find(l => l.startsWith("# "))?.slice(2).trim() || "Sarathi Presentation";
     addNotification({
       type: "complete",
       title: "Sarathi — Presentation Ready",
       message: "Presentation downloaded. Open the HTML file in any browser — use arrow keys to navigate slides.",
     });
-  }, [addNotification]);
+    addCreativityItem({
+      type: "presentation",
+      title: firstLine,
+      slideCount,
+      downloadContent: content,
+      downloadFilename: "sarathi-presentation",
+    });
+  }, [addNotification, addCreativityItem]);
 
   const messageRenderer = useCallback(
     (msg: ChatMessage, brandBgClass: string) =>

@@ -15,6 +15,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import JSZip from "jszip";
 import { useNotifications } from "@/contexts/notifications";
+import { useCreativityStore } from "@/contexts/creativity-store";
 
 interface ProjectFile {
   name: string;
@@ -192,6 +193,7 @@ export default function WebCraft() {
 
   const createConversation = useCreateOpenaiConversation();
   const { addNotification } = useNotifications();
+  const { addItem: addCreativityItem } = useCreativityStore();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [showCode, setShowCode] = useState(false);
@@ -217,10 +219,18 @@ export default function WebCraft() {
         const shortDesc = desc.split("\n")[0]?.slice(0, 80) || `Build v${versions.length + 1}`;
         setVersions(prev => {
           const vNum = prev.length + 1;
+          const html = buildPreviewHtml(msgFiles);
           addNotification({
             type: "build",
             title: "WebCraft Build Complete",
             message: `v${vNum} · ${msgFiles.length} file${msgFiles.length !== 1 ? "s" : ""} generated — ${msgFiles.map(f => f.name).join(", ")}`,
+          });
+          addCreativityItem({
+            type: "website",
+            title: shortDesc || `WebCraft Site v${vNum}`,
+            fileCount: msgFiles.length,
+            fileNames: msgFiles.map(f => f.name),
+            previewHtml: html,
           });
           return [
             ...prev,
