@@ -7,7 +7,7 @@ import { useGetOpenaiConversation } from "@workspace/api-client-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-interface ChatInterfaceProps {
+export interface ChatInterfaceProps {
   conversationId?: number;
   title: string;
   systemPrompt?: string;
@@ -18,9 +18,10 @@ interface ChatInterfaceProps {
   brandColor?: "primary" | "secondary" | "accent";
   onMessagesChange?: (messages: ChatMessage[]) => void;
   enableImageGen?: boolean;
+  messageRenderer?: (msg: ChatMessage, brandBgClass: string) => React.ReactNode | null;
 }
 
-function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
     navigator.clipboard.writeText(text);
@@ -38,7 +39,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function MessageContent({ content, imageB64 }: { content: string; imageB64?: string }) {
+export function MessageContent({ content, imageB64 }: { content: string; imageB64?: string }) {
   if (imageB64) {
     const dataUrl = `data:image/png;base64,${imageB64}`;
     const handleDownload = () => {
@@ -103,7 +104,9 @@ function MessageContent({ content, imageB64 }: { content: string; imageB64?: str
                 const numMatch = line.match(/^(\d+)\. (.*)/);
                 if (numMatch) return <div key={j} className="flex gap-2"><span className="text-primary">{numMatch[1]}.</span><span>{numMatch[2]}</span></div>;
               }
-              const boldLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-white/10 px-1 rounded text-xs font-mono">$1</code>');
+              const boldLine = line
+                .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+                .replace(/`([^`]+)`/g, '<code class="bg-white/10 px-1 rounded text-xs font-mono">$1</code>');
               return <p key={j} dangerouslySetInnerHTML={{ __html: boldLine || "&nbsp;" }} />;
             })}
           </div>
@@ -113,7 +116,11 @@ function MessageContent({ content, imageB64 }: { content: string; imageB64?: str
   );
 }
 
-const IMAGE_KEYWORDS = ["generate image", "create image", "make image", "draw", "paint", "illustrate", "show me a picture", "generate a picture", "image of", "picture of", "/imagine"];
+const IMAGE_KEYWORDS = [
+  "generate image", "create image", "make image", "draw", "paint",
+  "illustrate", "show me a picture", "generate a picture", "image of",
+  "picture of", "/imagine",
+];
 
 function detectImageRequest(text: string): boolean {
   const lower = text.toLowerCase();
@@ -131,6 +138,7 @@ export function ChatInterface({
   brandColor = "primary",
   onMessagesChange,
   enableImageGen = false,
+  messageRenderer,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -140,7 +148,8 @@ export function ChatInterface({
     { query: { enabled: !!conversationId } }
   );
 
-  const { messages, setMessages, sendMessage, sendImageMessage, stopStream, isStreaming, error } = useChatStream(conversationId);
+  const { messages, setMessages, sendMessage, sendImageMessage, stopStream, isStreaming, error } =
+    useChatStream(conversationId);
 
   useEffect(() => {
     onMessagesChange?.(messages);
@@ -164,28 +173,29 @@ export function ChatInterface({
     }
   }, [messages, isStreaming]);
 
-  const handleSubmit = useCallback((e?: React.FormEvent) => {
-    e?.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed) return;
+  const handleSubmit = useCallback(
+    (e?: React.FormEvent) => {
+      e?.preventDefault();
+      const trimmed = input.trim();
+      if (!trimmed) return;
 
-    if (!conversationId && onNewMessage) {
-      onNewMessage(trimmed);
+      if (!conversationId && onNewMessage) {
+        onNewMessage(trimmed);
+        setInput("");
+        return;
+      }
+
+      if (isStreaming) stopStream();
+
+      if (enableImageGen && detectImageRequest(trimmed)) {
+        sendImageMessage(trimmed);
+      } else {
+        sendMessage(trimmed, systemPrompt);
+      }
       setInput("");
-      return;
-    }
-
-    if (isStreaming) {
-      stopStream();
-    }
-
-    if (enableImageGen && detectImageRequest(trimmed)) {
-      sendImageMessage(trimmed);
-    } else {
-      sendMessage(trimmed, systemPrompt);
-    }
-    setInput("");
-  }, [input, conversationId, onNewMessage, isStreaming, stopStream, enableImageGen, sendImageMessage, sendMessage, systemPrompt]);
+    },
+    [input, conversationId, onNewMessage, isStreaming, stopStream, enableImageGen, sendImageMessage, sendMessage, systemPrompt]
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -202,9 +212,9 @@ export function ChatInterface({
 
   return (
     <div className="flex flex-col h-full bg-background relative overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 bg-background/80 backdrop-blur-sm z-10">
-        <h1 className="text-xl font-bold text-white tracking-tight">{title}</h1>
-        {headerContent}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 bg-background/80 backdrop-blur-sm z-10 gap-4">
+        <h1 className="text-xl font-bold text-white tracking-tight shrink-0">{title}</h1>
+        <div className="flex-1 flex justify-end">{headerContent}</div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4" ref={scrollRef}>
@@ -217,33 +227,40 @@ export function ChatInterface({
             {emptyStateContent}
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto space-y-6 pb-24">
-            {messages.map((msg, idx) => (
-              <div
-                key={msg.id || idx}
-                className={`flex gap-4 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                {msg.role === "assistant" && (
-                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-1 ${brandBgClass}`}>
-                    <Bot className="h-4 w-4" />
-                  </div>
-                )}
+          <div className="max-w-4xl mx-auto space-y-6 pb-28">
+            {messages.map((msg, idx) => {
+              if (messageRenderer) {
+                const custom = messageRenderer(msg, brandBgClass);
+                if (custom !== null) return <div key={msg.id || idx}>{custom}</div>;
+              }
 
-                <div className={`px-4 py-3 rounded-2xl max-w-[85%] text-sm ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground rounded-tr-sm"
-                    : "bg-card border border-border text-card-foreground rounded-tl-sm"
-                }`}>
-                  <MessageContent content={msg.content} imageB64={msg.imageB64} />
+              return (
+                <div
+                  key={msg.id || idx}
+                  className={`flex gap-4 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  {msg.role === "assistant" && (
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mt-1 ${brandBgClass}`}>
+                      <Bot className="h-4 w-4" />
+                    </div>
+                  )}
+                  <div
+                    className={`px-4 py-3 rounded-2xl max-w-[85%] text-sm ${
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-tr-sm"
+                        : "bg-card border border-border text-card-foreground rounded-tl-sm"
+                    }`}
+                  >
+                    <MessageContent content={msg.content} imageB64={msg.imageB64} />
+                  </div>
+                  {msg.role === "user" && (
+                    <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
+                      <User className="h-4 w-4" />
+                    </div>
+                  )}
                 </div>
-
-                {msg.role === "user" && (
-                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
-                    <User className="h-4 w-4" />
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
 
             {isStreaming && messages[messages.length - 1]?.content === "" && (
               <div className="flex gap-4 justify-start">
@@ -251,9 +268,9 @@ export function ChatInterface({
                   <Bot className="h-4 w-4" />
                 </div>
                 <div className="px-4 py-3 rounded-2xl bg-card border border-border text-card-foreground rounded-tl-sm flex items-center gap-2">
-                  <span className="h-2 w-2 bg-primary rounded-full animate-bounce" />
-                  <span className="h-2 w-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                  <span className="h-2 w-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.4s" }} />
+                  <span className="h-2 w-2 bg-secondary rounded-full animate-bounce" />
+                  <span className="h-2 w-2 bg-secondary rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
+                  <span className="h-2 w-2 bg-secondary rounded-full animate-bounce" style={{ animationDelay: "0.4s" }} />
                 </div>
               </div>
             )}
@@ -267,17 +284,20 @@ export function ChatInterface({
         )}
       </div>
 
-      <div className="p-4 bg-gradient-to-t from-background via-background to-transparent border-t border-border/50 absolute bottom-0 left-0 right-0">
+      <div className="p-4 border-t border-border/50 absolute bottom-0 left-0 right-0 bg-background">
         <div className="max-w-4xl mx-auto">
-          <form onSubmit={handleSubmit} className="relative flex items-end gap-2 bg-card border border-border rounded-xl p-2 focus-within:ring-1 focus-within:ring-primary transition-all">
+          <form
+            onSubmit={handleSubmit}
+            className="relative flex items-end gap-2 bg-card border border-border rounded-xl p-2 focus-within:ring-1 focus-within:ring-primary transition-all"
+          >
             {enableImageGen && (
-              <div className="p-3 text-muted-foreground">
+              <div className="p-3 text-muted-foreground shrink-0">
                 <ImageIcon className="w-4 h-4" />
               </div>
             )}
             <Textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={isStreaming ? "Type to interrupt and send a new message..." : placeholder}
               className="min-h-[52px] max-h-32 resize-none border-0 focus-visible:ring-0 bg-transparent text-white p-3"
@@ -286,14 +306,16 @@ export function ChatInterface({
               type={isStreaming ? "button" : "submit"}
               size="icon"
               onClick={isStreaming ? stopStream : undefined}
-              disabled={!isStreaming && !input.trim() && !conversationId}
+              disabled={!isStreaming && !input.trim()}
               className={`shrink-0 h-10 w-10 rounded-lg mb-1 mr-1 ${isStreaming ? "bg-destructive hover:bg-destructive/80" : ""}`}
             >
               {isStreaming ? <StopCircle className="h-5 w-5" /> : <Send className="h-5 w-5" />}
             </Button>
           </form>
           <p className="text-center mt-2 text-xs text-muted-foreground">
-            {isStreaming ? "Press Stop or type to interrupt." : "Universe AI · Built by Manish Kumar Chaturvedi"}
+            {isStreaming
+              ? "Press Stop or type a new message to interrupt."
+              : "Universe AI · Built by Manish Kumar Chaturvedi"}
           </p>
         </div>
       </div>
