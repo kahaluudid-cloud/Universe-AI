@@ -25,7 +25,7 @@ export async function* streamGroq(
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model,
+      model: model === "llama3-70b-8192" ? "llama-3.3-70b-versatile" : model,
       messages: [
         { role: "system", content: systemPrompt },
         ...messages,
