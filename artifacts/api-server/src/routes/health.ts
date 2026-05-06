@@ -4,7 +4,14 @@ import { checkKey } from "../lib/failover.js";
 
 const router: IRouter = Router();
 
+// Mounted at /api/health — so /healthz becomes /api/health/healthz
+// Also keep a root alias for backwards compatibility via main index
 router.get("/healthz", (_req, res) => {
+  const data = HealthCheckResponse.parse({ status: "ok" });
+  res.json(data);
+});
+
+router.get("/", (_req, res) => {
   const data = HealthCheckResponse.parse({ status: "ok" });
   res.json(data);
 });

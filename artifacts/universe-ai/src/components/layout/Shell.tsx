@@ -185,6 +185,8 @@ function KeyHealthPanel() {
                 className={`flex items-center gap-2 py-1.5 px-2 rounded-md border ${
                   !val.configured
                     ? "bg-white/3 border-border opacity-50"
+                    : val.ok && val.error === "rate_limited"
+                    ? "bg-yellow-500/5 border-yellow-500/20"
                     : val.ok
                     ? "bg-emerald-500/5 border-emerald-500/20"
                     : "bg-red-500/5 border-red-500/20"
@@ -193,14 +195,19 @@ function KeyHealthPanel() {
                 <div className="w-2 h-2 rounded-full shrink-0" style={{ background: val.configured ? meta.color : "#555" }} />
                 <span className="text-xs text-white flex-1 truncate">{meta.label}</span>
                 {!val.configured && <span className="text-[10px] text-muted-foreground">Not set</span>}
-                {val.configured && val.ok && (
+                {val.configured && val.ok && val.error === "rate_limited" && (
+                  <span className="text-[10px] text-yellow-400 flex items-center gap-0.5">
+                    <CheckCircle2 className="w-2.5 h-2.5" /> Valid · Quota
+                  </span>
+                )}
+                {val.configured && val.ok && !val.error && (
                   <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">
                     <CheckCircle2 className="w-2.5 h-2.5" /> {val.latency}ms
                   </span>
                 )}
                 {val.configured && !val.ok && (
                   <span className="text-[10px] text-red-400 flex items-center gap-0.5">
-                    <AlertCircle className="w-2.5 h-2.5" /> Error
+                    <AlertCircle className="w-2.5 h-2.5" /> Invalid
                   </span>
                 )}
               </div>

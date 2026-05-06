@@ -92,7 +92,7 @@ export async function checkKey(
   try {
     if (prefix === "GEMINI_KEY") {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -103,6 +103,10 @@ export async function checkKey(
           signal: AbortSignal.timeout(8000),
         }
       );
+      if (res.status === 429) {
+        // 429 = key is valid but rate-limited — treat as OK (quota will reset)
+        return { ok: true, latency: Date.now() - start, error: "rate_limited" };
+      }
       if (!res.ok) {
         const txt = await res.text();
         return { ok: false, latency: Date.now() - start, error: `HTTP ${res.status}: ${txt.slice(0, 100)}` };
@@ -124,6 +128,10 @@ export async function checkKey(
         }),
         signal: AbortSignal.timeout(8000),
       });
+      if (res.status === 429) {
+        // 429 = key is valid but rate-limited — treat as OK
+        return { ok: true, latency: Date.now() - start, error: "rate_limited" };
+      }
       if (!res.ok) {
         const txt = await res.text();
         return { ok: false, latency: Date.now() - start, error: `HTTP ${res.status}: ${txt.slice(0, 100)}` };

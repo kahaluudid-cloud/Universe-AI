@@ -4,7 +4,7 @@ import openaiRouter from "./openai/conversations";
 
 const router: IRouter = Router();
 
-router.use(healthRouter);
+router.use("/health", healthRouter);
 router.use("/openai", openaiRouter);
 
 export default router;
