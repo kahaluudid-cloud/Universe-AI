@@ -4,8 +4,6 @@ import { checkKey } from "../lib/failover.js";
 
 const router: IRouter = Router();
 
-// Mounted at /api/health — so /healthz becomes /api/health/healthz
-// Also keep a root alias for backwards compatibility via main index
 router.get("/healthz", (_req, res) => {
   const data = HealthCheckResponse.parse({ status: "ok" });
   res.json(data);
@@ -16,31 +14,26 @@ router.get("/", (_req, res) => {
   res.json(data);
 });
 
-// Full key health check — tests all configured keys
+// Full key health check — tests all configured keys (up to 5 per provider)
 router.get("/keys/health", async (_req, res) => {
   const results: Record<string, { configured: boolean; ok?: boolean; latency?: number; error?: string }> = {};
-
   const checks: Promise<void>[] = [];
 
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 5; i++) {
     const k = `GEMINI_KEY_${i}`;
     const val = process.env[k];
     if (val) {
-      checks.push(
-        checkKey("GEMINI_KEY", val).then((r) => { results[k] = { configured: true, ...r }; })
-      );
+      checks.push(checkKey("GEMINI_KEY", val).then((r) => { results[k] = { configured: true, ...r }; }));
     } else {
       results[k] = { configured: false };
     }
   }
 
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 5; i++) {
     const k = `GROQ_KEY_${i}`;
     const val = process.env[k];
     if (val) {
-      checks.push(
-        checkKey("GROQ_KEY", val).then((r) => { results[k] = { configured: true, ...r }; })
-      );
+      checks.push(checkKey("GROQ_KEY", val).then((r) => { results[k] = { configured: true, ...r }; }));
     } else {
       results[k] = { configured: false };
     }
@@ -48,24 +41,25 @@ router.get("/keys/health", async (_req, res) => {
 
   const hfToken = process.env["HF_TOKEN"];
   if (hfToken) {
-    checks.push(
-      checkKey("HF_TOKEN", hfToken).then((r) => { results["HF_TOKEN"] = { configured: true, ...r }; })
-    );
+    checks.push(checkKey("HF_TOKEN", hfToken).then((r) => { results["HF_TOKEN"] = { configured: true, ...r }; }));
   } else {
     results["HF_TOKEN"] = { configured: false };
   }
 
+  const orKey = process.env["OPENROUTER_API_KEY"];
+  results["OPENROUTER_API_KEY"] = { configured: !!orKey };
+
   await Promise.allSettled(checks);
 
   const allConfigured = Object.values(results).filter((r) => r.configured);
-  const allOk = allConfigured.filter((r) => r.ok);
+  const allOk = allConfigured.filter((r) => r.ok !== false);
 
   res.json({
     keys: results,
     summary: {
       total: allConfigured.length,
       healthy: allOk.length,
-      mode: allConfigured.length > 0 ? "hybrid" : "primary-only",
+      mode: allConfigured.length > 0 ? "auto-failover" : "no-keys",
     },
   });
 });

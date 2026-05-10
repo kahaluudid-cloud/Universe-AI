@@ -1,12 +1,19 @@
 /**
- * Failover Key Pool Manager
- * 3 Gemini keys + 3 Groq keys — auto-rotates on 429/500 errors
- * Resets to key[0] every 24 hours automatically
+ * Failover Key Pool Manager — 24/7 Auto-Rotation
+ *
+ * - Up to 5 keys per provider (GEMINI_KEY_1 … GEMINI_KEY_5)
+ * - 429 rate-limited key → 60s cooldown, then auto-retry
+ * - All keys exhausted → wait for earliest recovery, then retry
+ * - Keys re-read from env every 6 hours (hot-reload support)
  */
 
-function getKeys(prefix: string): string[] {
+const RATE_LIMIT_COOLDOWN_MS = 60_000;   // 60s cooldown after 429
+const KEY_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // re-read env every 6h
+const MAX_WAIT_MS = 90_000;              // max 90s wait if all keys exhausted
+
+function readKeys(prefix: string): string[] {
   const keys: string[] = [];
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 5; i++) {
     const k = process.env[`${prefix}_${i}`];
     if (k && k.trim()) keys.push(k.trim());
   }
@@ -16,7 +23,8 @@ function getKeys(prefix: string): string[] {
 interface KeyPool {
   keys: string[];
   currentIndex: number;
-  lastResetAt: number;
+  lastRefreshedAt: number;
+  rateLimitedUntil: Map<string, number>;
 }
 
 const pools: Record<string, KeyPool> = {};
@@ -24,17 +32,16 @@ const pools: Record<string, KeyPool> = {};
 function getPool(prefix: string): KeyPool {
   if (!pools[prefix]) {
     pools[prefix] = {
-      keys: getKeys(prefix),
+      keys: readKeys(prefix),
       currentIndex: 0,
-      lastResetAt: Date.now(),
+      lastRefreshedAt: Date.now(),
+      rateLimitedUntil: new Map(),
     };
   }
   const pool = pools[prefix];
-  // Auto-reset every 24 hours
-  if (Date.now() - pool.lastResetAt > 24 * 60 * 60 * 1000) {
-    pool.currentIndex = 0;
-    pool.lastResetAt = Date.now();
-    pool.keys = getKeys(prefix); // re-read from env in case updated
+  if (Date.now() - pool.lastRefreshedAt > KEY_REFRESH_INTERVAL_MS) {
+    pool.keys = readKeys(prefix);
+    pool.lastRefreshedAt = Date.now();
   }
   return pool;
 }
@@ -47,9 +54,23 @@ export function hasKeys(prefix: string): boolean {
   return getPool(prefix).keys.length > 0;
 }
 
+/** Returns how long (ms) until the earliest blocked key recovers. 0 = at least one key is free now. */
+function msUntilAnyKeyFree(pool: KeyPool): number {
+  const now = Date.now();
+  let minWait = Infinity;
+  for (const key of pool.keys) {
+    const until = pool.rateLimitedUntil.get(key) ?? 0;
+    const wait = until - now;
+    if (wait <= 0) return 0;
+    if (wait < minWait) minWait = wait;
+  }
+  return minWait === Infinity ? 0 : minWait;
+}
+
 /**
- * Tries each key in the pool in order.
- * Rotates on 429 / network errors. Returns null if all keys fail.
+ * Tries every key in the pool. On 429/503, marks the key with a cooldown
+ * and moves to the next one. If ALL keys are rate-limited, waits until
+ * the earliest one recovers (up to MAX_WAIT_MS), then retries once more.
  */
 export async function withKeyRotation<T>(
   prefix: string,
@@ -60,27 +81,50 @@ export async function withKeyRotation<T>(
     throw new Error(`No ${prefix} keys configured`);
   }
 
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < pool.keys.length; attempt++) {
-    const idx = (pool.currentIndex + attempt) % pool.keys.length;
-    const key = pool.keys[idx];
-    try {
-      const result = await fn(key);
-      pool.currentIndex = idx; // Stick with working key
-      return result;
-    } catch (err: unknown) {
-      lastErr = err;
-      const status = (err as { status?: number; response?: { status: number } })?.status
-        ?? (err as { response?: { status: number } })?.response?.status;
-      if (status === 429 || status === 500 || status === 503) {
-        // Rotate to next key
-        pool.currentIndex = (idx + 1) % pool.keys.length;
-        continue;
+  const tryOnce = async (): Promise<T | null> => {
+    const now = Date.now();
+    for (let attempt = 0; attempt < pool.keys.length; attempt++) {
+      const idx = (pool.currentIndex + attempt) % pool.keys.length;
+      const key = pool.keys[idx];
+
+      const blockedUntil = pool.rateLimitedUntil.get(key) ?? 0;
+      if (now < blockedUntil) continue;
+
+      try {
+        const result = await fn(key);
+        pool.currentIndex = idx;
+        return result;
+      } catch (err: unknown) {
+        const status =
+          (err as { status?: number })?.status ??
+          (err as { response?: { status: number } })?.response?.status;
+
+        if (status === 429 || status === 503) {
+          pool.rateLimitedUntil.set(key, Date.now() + RATE_LIMIT_COOLDOWN_MS);
+          pool.currentIndex = (idx + 1) % pool.keys.length;
+          continue;
+        }
+        if (status === 500) {
+          pool.currentIndex = (idx + 1) % pool.keys.length;
+          continue;
+        }
+        throw err;
       }
-      throw err; // Non-rate-limit error — don't rotate
     }
+    return null;
+  };
+
+  const result = await tryOnce();
+  if (result !== null) return result;
+
+  const waitMs = Math.min(msUntilAnyKeyFree(pool), MAX_WAIT_MS);
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs + 500));
+    const retried = await tryOnce();
+    if (retried !== null) return retried;
   }
-  throw lastErr;
+
+  throw new Error(`All ${prefix} keys are rate-limited. Provider will be skipped.`);
 }
 
 /** Health check: test each key with a minimal ping */
@@ -104,7 +148,6 @@ export async function checkKey(
         }
       );
       if (res.status === 429) {
-        // 429 = key is valid but rate-limited — treat as OK (quota will reset)
         return { ok: true, latency: Date.now() - start, error: "rate_limited" };
       }
       if (!res.ok) {
@@ -129,7 +172,6 @@ export async function checkKey(
         signal: AbortSignal.timeout(8000),
       });
       if (res.status === 429) {
-        // 429 = key is valid but rate-limited — treat as OK
         return { ok: true, latency: Date.now() - start, error: "rate_limited" };
       }
       if (!res.ok) {

@@ -153,65 +153,83 @@ async function* hybridStream(
   modelKey: string | undefined,
   log: typeof console
 ): AsyncGenerator<string> {
-  // ── If user picked a specific model, use it directly ──────────────────────
+  // ── If user picked a specific model, use it directly — no fallback ─────────
   if (modelKey && modelKey !== "auto") {
     try {
       yield* routeToModel(modelKey, systemPrompt, chatMessages, log);
       return;
     } catch (err) {
-      log.warn?.(`Model ${modelKey} failed, falling back:`, err);
+      log.warn?.(`Model ${modelKey} failed, falling back to auto:`, err);
     }
   }
 
   const isManish = convType === "manish";
 
-  if (isManish) {
-    // Manish: Groq (fast) → OpenRouter → Gemini
-    if (hasKeys("GROQ_KEY")) {
-      try {
-        yield* await withKeyRotation("GROQ_KEY", (key) =>
-          Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
-        );
-        return;
-      } catch (err) { log.warn?.("Groq failed for Manish:", err); }
-    }
-    if (hasOpenRouter()) {
-      try {
-        yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, "or:llama-70b");
-        return;
-      } catch (err) { log.warn?.("OpenRouter failed for Manish:", err); }
-    }
-    if (hasKeys("GEMINI_KEY")) {
-      yield* await withKeyRotation("GEMINI_KEY", (key) =>
-        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL))
+  // Provider order: Manish = Groq → OpenRouter → Gemini
+  //                 Sarathi = OpenRouter → Groq → Gemini
+  // Flat fallback chain
+  const errors: string[] = [];
+
+  // 1. Groq (Manish) / OpenRouter (Sarathi)
+  if (isManish && hasKeys("GROQ_KEY")) {
+    try {
+      yield* await withKeyRotation("GROQ_KEY", (key) =>
+        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
       );
       return;
+    } catch (err) {
+      errors.push(`Groq: ${err}`);
+      log.warn?.("Groq exhausted, trying next provider...");
     }
-  } else {
-    // Sarathi/WebCraft: OpenRouter → Groq → Gemini
-    if (hasOpenRouter()) {
-      try {
-        yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, DEFAULT_OR_MODEL);
-        return;
-      } catch (err) { log.warn?.("OpenRouter failed for Sarathi:", err); }
-    }
-    if (hasKeys("GROQ_KEY")) {
-      try {
-        yield* await withKeyRotation("GROQ_KEY", (key) =>
-          Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
-        );
-        return;
-      } catch (err) { log.warn?.("Groq failed for Sarathi:", err); }
-    }
-    if (hasKeys("GEMINI_KEY")) {
-      yield* await withKeyRotation("GEMINI_KEY", (key) =>
-        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL))
-      );
+  }
+  if (!isManish && hasOpenRouter()) {
+    try {
+      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, DEFAULT_OR_MODEL);
       return;
+    } catch (err) {
+      errors.push(`OpenRouter: ${err}`);
+      log.warn?.("OpenRouter exhausted, trying next provider...");
     }
   }
 
-  throw new Error("Koi bhi API key kaam nahi kar rahi. Apni keys check karein.");
+  // 2. OpenRouter (Manish) / Groq (Sarathi)
+  if (isManish && hasOpenRouter()) {
+    try {
+      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, "or:llama-70b");
+      return;
+    } catch (err) {
+      errors.push(`OpenRouter: ${err}`);
+      log.warn?.("OpenRouter exhausted, trying Gemini...");
+    }
+  }
+  if (!isManish && hasKeys("GROQ_KEY")) {
+    try {
+      yield* await withKeyRotation("GROQ_KEY", (key) =>
+        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
+      );
+      return;
+    } catch (err) {
+      errors.push(`Groq: ${err}`);
+      log.warn?.("Groq exhausted, trying Gemini...");
+    }
+  }
+
+  // 3. Gemini — last resort for both modes
+  if (hasKeys("GEMINI_KEY")) {
+    try {
+      yield* await withKeyRotation("GEMINI_KEY", (key) =>
+        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL))
+      );
+      return;
+    } catch (err) {
+      errors.push(`Gemini: ${err}`);
+      log.warn?.("Gemini exhausted too.");
+    }
+  }
+
+  throw new Error(
+    `Sabhi providers rate-limited hain. Thodi der baad retry karein.\nDetails: ${errors.join(" | ")}`
+  );
 }
 
 // ─── Message endpoint ─────────────────────────────────────────────────────────
