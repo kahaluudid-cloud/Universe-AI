@@ -9,6 +9,24 @@ config({ path: resolve(__dirname, "../.env") });
 import app from "./app";
 import { logger } from "./lib/logger";
 
+// ── 24/7 Crash Protection ─────────────────────────────────────────────────────
+// Unhandled promise rejections ko gracefully handle karo — server crash nahi hoga
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error({ reason, promise }, "Unhandled promise rejection — server continues");
+});
+
+// Uncaught exceptions ko log karo — critical errors pe bhi server chalta rahe
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception — server continues");
+});
+
+// SIGTERM pe graceful shutdown (Replit restart ke liye)
+process.on("SIGTERM", () => {
+  logger.info("SIGTERM received — graceful shutdown");
+  process.exit(0);
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
