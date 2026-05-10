@@ -1,6 +1,6 @@
 /**
- * Groq Llama 3 — SSE streaming adapter (OpenAI-compatible API)
- * Used as primary for Manish Chat (fast human-like responses)
+ * Groq — SSE streaming adapter (OpenAI-compatible API)
+ * All free Groq models supported
  */
 
 interface ChatMessage {
@@ -12,12 +12,31 @@ interface GroqChunk {
   choices?: { delta?: { content?: string }; finish_reason?: string }[];
 }
 
+// ─── All free Groq models ─────────────────────────────────────────────────────
+export const GROQ_MODELS: Record<string, { id: string; name: string; tag: string }> = {
+  "groq:llama3.3-70b":    { id: "llama-3.3-70b-versatile",          name: "Llama 3.3 70B",         tag: "Best" },
+  "groq:llama3.1-8b":     { id: "llama-3.1-8b-instant",             name: "Llama 3.1 8B",          tag: "Fastest" },
+  "groq:llama3-70b":      { id: "llama3-70b-8192",                  name: "Llama 3 70B",           tag: "Smart" },
+  "groq:llama3-8b":       { id: "llama3-8b-8192",                   name: "Llama 3 8B",            tag: "Light" },
+  "groq:gemma2-9b":       { id: "gemma2-9b-it",                     name: "Gemma 2 9B",            tag: "Google" },
+  "groq:mixtral-8x7b":    { id: "mixtral-8x7b-32768",               name: "Mixtral 8x7B",          tag: "MoE" },
+  "groq:deepseek-r1":     { id: "deepseek-r1-distill-llama-70b",    name: "DeepSeek R1 (Groq)",    tag: "Reasoning" },
+};
+
+export const DEFAULT_GROQ_MODEL = "groq:llama3.3-70b";
+
+function getGroqModelId(modelKey: string): string {
+  return GROQ_MODELS[modelKey]?.id ?? GROQ_MODELS[DEFAULT_GROQ_MODEL].id;
+}
+
 export async function* streamGroq(
   key: string,
   systemPrompt: string,
   messages: ChatMessage[],
-  model = "llama3-70b-8192"
+  modelKey = DEFAULT_GROQ_MODEL
 ): AsyncGenerator<string> {
+  const modelId = getGroqModelId(modelKey);
+
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -25,11 +44,8 @@ export async function* streamGroq(
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: model === "llama3-70b-8192" ? "llama-3.3-70b-versatile" : model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages,
-      ],
+      model: modelId,
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
       max_tokens: 8192,
       temperature: 0.8,
       stream: true,
@@ -65,7 +81,7 @@ export async function* streamGroq(
         const text = parsed.choices?.[0]?.delta?.content;
         if (text) yield text;
       } catch {
-        // Skip malformed chunks
+        // skip malformed chunks
       }
     }
   }

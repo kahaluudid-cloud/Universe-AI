@@ -1,6 +1,6 @@
 /**
- * Gemini 1.5 Flash — SSE streaming adapter
- * Used as backup when primary (Replit OpenAI) fails
+ * Gemini — SSE streaming adapter (direct API)
+ * Supports multiple Gemini models
  */
 
 interface GeminiMessage {
@@ -15,18 +15,35 @@ interface GeminiChunk {
   }[];
 }
 
+// ─── Gemini models available with free API key ────────────────────────────────
+export const GEMINI_MODELS: Record<string, { id: string; name: string; tag: string }> = {
+  "gemini:2.0-flash":      { id: "gemini-2.0-flash",      name: "Gemini 2.0 Flash",      tag: "Fast" },
+  "gemini:2.0-flash-lite": { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite", tag: "Lightest" },
+  "gemini:1.5-flash":      { id: "gemini-1.5-flash",      name: "Gemini 1.5 Flash",      tag: "Stable" },
+  "gemini:1.5-flash-8b":   { id: "gemini-1.5-flash-8b",   name: "Gemini 1.5 Flash 8B",   tag: "Tiny" },
+  "gemini:1.5-pro":        { id: "gemini-1.5-pro",        name: "Gemini 1.5 Pro",        tag: "Smart" },
+};
+
+export const DEFAULT_GEMINI_MODEL = "gemini:2.0-flash";
+
+function getGeminiModelId(modelKey: string): string {
+  return GEMINI_MODELS[modelKey]?.id ?? GEMINI_MODELS[DEFAULT_GEMINI_MODEL].id;
+}
+
 export async function* streamGemini(
   key: string,
   systemPrompt: string,
-  messages: GeminiMessage[]
+  messages: GeminiMessage[],
+  modelKey = DEFAULT_GEMINI_MODEL
 ): AsyncGenerator<string> {
-  // Convert to Gemini format
+  const modelId = getGeminiModelId(modelKey);
+
   const contents = messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: m.content }],
   }));
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?key=${key}&alt=sse`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${key}&alt=sse`;
 
   const res = await fetch(url, {
     method: "POST",
@@ -34,10 +51,7 @@ export async function* streamGemini(
     body: JSON.stringify({
       contents,
       systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: {
-        maxOutputTokens: 8192,
-        temperature: 0.7,
-      },
+      generationConfig: { maxOutputTokens: 8192, temperature: 0.7 },
     }),
   });
 
@@ -70,7 +84,7 @@ export async function* streamGemini(
         const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text) yield text;
       } catch {
-        // Skip malformed chunks
+        // skip malformed chunks
       }
     }
   }

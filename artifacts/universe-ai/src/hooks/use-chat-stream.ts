@@ -21,7 +21,7 @@ export function useChatStream(conversationId?: number) {
     }
   }, []);
 
-  const sendMessage = useCallback(async (content: string, systemPrompt?: string) => {
+  const sendMessage = useCallback(async (content: string, systemPrompt?: string, model?: string) => {
     if (!conversationId) return;
 
     if (abortControllerRef.current) {
@@ -46,7 +46,7 @@ export function useChatStream(conversationId?: number) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, systemPrompt }),
+          body: JSON.stringify({ content, systemPrompt, model }),
           signal: abortController.signal,
         }
       );

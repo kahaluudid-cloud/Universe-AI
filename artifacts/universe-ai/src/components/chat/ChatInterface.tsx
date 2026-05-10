@@ -11,6 +11,7 @@ export interface ChatInterfaceProps {
   conversationId?: number;
   title: string;
   systemPrompt?: string;
+  model?: string;
   placeholder?: string;
   headerContent?: React.ReactNode;
   emptyStateContent?: React.ReactNode;
@@ -131,6 +132,7 @@ export function ChatInterface({
   conversationId,
   title,
   systemPrompt,
+  model,
   placeholder = "Type your message...",
   headerContent,
   emptyStateContent,
@@ -190,11 +192,11 @@ export function ChatInterface({
       if (enableImageGen && detectImageRequest(trimmed)) {
         sendImageMessage(trimmed);
       } else {
-        sendMessage(trimmed, systemPrompt);
+        sendMessage(trimmed, systemPrompt, model);
       }
       setInput("");
     },
-    [input, conversationId, onNewMessage, isStreaming, stopStream, enableImageGen, sendImageMessage, sendMessage, systemPrompt]
+    [input, conversationId, onNewMessage, isStreaming, stopStream, enableImageGen, sendImageMessage, sendMessage, systemPrompt, model]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

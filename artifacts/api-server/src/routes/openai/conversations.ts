@@ -12,9 +12,9 @@ import {
   GenerateOpenaiImageBody,
 } from "@workspace/api-zod";
 import { withKeyRotation, hasKeys } from "../../lib/failover.js";
-import { streamGemini } from "../../lib/gemini-stream.js";
-import { streamGroq } from "../../lib/groq-stream.js";
-import { streamOpenRouter, OPENROUTER_MODELS } from "../../lib/openrouter-stream.js";
+import { streamGemini, GEMINI_MODELS, DEFAULT_GEMINI_MODEL } from "../../lib/gemini-stream.js";
+import { streamGroq, GROQ_MODELS, DEFAULT_GROQ_MODEL } from "../../lib/groq-stream.js";
+import { streamOpenRouter, OR_MODELS, DEFAULT_OR_MODEL } from "../../lib/openrouter-stream.js";
 import { generateImageHuggingFace } from "../../lib/huggingface.js";
 
 const router = Router();
@@ -96,101 +96,122 @@ const MANISH_SYSTEM_PROMPT = `Aap "Manish Chat" hain — Universe AI ka emotiona
 Personality: empathetic, caring, counter-questions poochein, warm aur supportive. Kabhi mechanical ya robotic mat bano.
 Hamesha Hindi/Hinglish mein respond karein. Creator: Manish Kumar Chaturvedi, Oteband, Balod, Chhattisgarh, India.`;
 
-// ─── Pure user-key streaming engine ──────────────────────────────────────────
-// Sirf aapki API keys — koi company backend nahi:
-//
-//  Manish Chat   → Groq (llama-3.3-70b, fast)
-//                → OpenRouter (gemini-2.0-flash free)
-//                → Gemini direct
-//
-//  Sarathi/WebCraft → OpenRouter (gemini-2.0-flash free)
-//                  → Groq (llama-3.3-70b)
-//                  → Gemini direct
+// ─── Smart model router ───────────────────────────────────────────────────────
+// model key format:
+//   "or:<key>"     → OpenRouter  (e.g. "or:gemini-flash")
+//   "groq:<key>"   → Groq        (e.g. "groq:llama3.3-70b")
+//   "gemini:<key>" → Gemini      (e.g. "gemini:2.0-flash")
+//   undefined      → auto (convType decides default)
 
 type MsgRole = { role: "user" | "assistant"; content: string };
 
-function hasOpenRouter(): boolean {
-  return !!process.env["OPENROUTER_API_KEY"];
+function hasOpenRouter(): boolean { return !!process.env["OPENROUTER_API_KEY"]; }
+function getOpenRouterKey(): string {
+  const k = process.env["OPENROUTER_API_KEY"];
+  if (!k) throw new Error("OPENROUTER_API_KEY not set");
+  return k;
 }
 
-function getOpenRouterKey(): string {
-  const key = process.env["OPENROUTER_API_KEY"];
-  if (!key) throw new Error("OPENROUTER_API_KEY not configured");
-  return key;
+async function* routeToModel(
+  modelKey: string,
+  systemPrompt: string,
+  chatMessages: MsgRole[],
+  log: typeof console
+): AsyncGenerator<string> {
+  // ── OpenRouter models ──
+  if (modelKey.startsWith("or:") || modelKey in OR_MODELS) {
+    if (!hasOpenRouter()) throw new Error("OPENROUTER_API_KEY not configured");
+    yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, modelKey);
+    return;
+  }
+
+  // ── Groq models ──
+  if (modelKey.startsWith("groq:") || modelKey in GROQ_MODELS) {
+    if (!hasKeys("GROQ_KEY")) throw new Error("GROQ_KEY not configured");
+    yield* await withKeyRotation("GROQ_KEY", (key) =>
+      Promise.resolve(streamGroq(key, systemPrompt, chatMessages, modelKey))
+    );
+    return;
+  }
+
+  // ── Gemini direct models ──
+  if (modelKey.startsWith("gemini:") || modelKey in GEMINI_MODELS) {
+    if (!hasKeys("GEMINI_KEY")) throw new Error("GEMINI_KEY not configured");
+    yield* await withKeyRotation("GEMINI_KEY", (key) =>
+      Promise.resolve(streamGemini(key, systemPrompt, chatMessages, modelKey))
+    );
+    return;
+  }
+
+  throw new Error(`Unknown model key: ${modelKey}`);
 }
 
 async function* hybridStream(
   convType: string,
   systemPrompt: string,
   chatMessages: MsgRole[],
+  modelKey: string | undefined,
   log: typeof console
 ): AsyncGenerator<string> {
+  // ── If user picked a specific model, use it directly ──────────────────────
+  if (modelKey && modelKey !== "auto") {
+    try {
+      yield* routeToModel(modelKey, systemPrompt, chatMessages, log);
+      return;
+    } catch (err) {
+      log.warn?.(`Model ${modelKey} failed, falling back:`, err);
+    }
+  }
+
   const isManish = convType === "manish";
 
   if (isManish) {
-    // ── Manish: Phase 1 — Groq (fast, human-like) ──────────────────────────
+    // Manish: Groq (fast) → OpenRouter → Gemini
     if (hasKeys("GROQ_KEY")) {
       try {
         yield* await withKeyRotation("GROQ_KEY", (key) =>
-          Promise.resolve(streamGroq(key, systemPrompt, chatMessages))
+          Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
         );
         return;
-      } catch (err) {
-        log.warn?.("Groq failed for Manish, trying OpenRouter:", err);
-      }
+      } catch (err) { log.warn?.("Groq failed for Manish:", err); }
     }
-
-    // ── Manish: Phase 2 — OpenRouter free ──────────────────────────────────
     if (hasOpenRouter()) {
       try {
-        yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, OPENROUTER_MODELS.fast);
+        yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, "or:llama-70b");
         return;
-      } catch (err) {
-        log.warn?.("OpenRouter failed for Manish, trying Gemini:", err);
-      }
+      } catch (err) { log.warn?.("OpenRouter failed for Manish:", err); }
     }
-
-    // ── Manish: Phase 3 — Gemini direct ────────────────────────────────────
     if (hasKeys("GEMINI_KEY")) {
       yield* await withKeyRotation("GEMINI_KEY", (key) =>
-        Promise.resolve(streamGemini(key, systemPrompt, chatMessages))
+        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL))
       );
       return;
     }
-
   } else {
-    // ── Sarathi/WebCraft: Phase 1 — OpenRouter (smart free model) ──────────
+    // Sarathi/WebCraft: OpenRouter → Groq → Gemini
     if (hasOpenRouter()) {
       try {
-        yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, OPENROUTER_MODELS.smart);
+        yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, DEFAULT_OR_MODEL);
         return;
-      } catch (err) {
-        log.warn?.("OpenRouter failed for Sarathi, trying Groq:", err);
-      }
+      } catch (err) { log.warn?.("OpenRouter failed for Sarathi:", err); }
     }
-
-    // ── Sarathi/WebCraft: Phase 2 — Groq ───────────────────────────────────
     if (hasKeys("GROQ_KEY")) {
       try {
         yield* await withKeyRotation("GROQ_KEY", (key) =>
-          Promise.resolve(streamGroq(key, systemPrompt, chatMessages))
+          Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
         );
         return;
-      } catch (err) {
-        log.warn?.("Groq failed for Sarathi, trying Gemini:", err);
-      }
+      } catch (err) { log.warn?.("Groq failed for Sarathi:", err); }
     }
-
-    // ── Sarathi/WebCraft: Phase 3 — Gemini direct ──────────────────────────
     if (hasKeys("GEMINI_KEY")) {
       yield* await withKeyRotation("GEMINI_KEY", (key) =>
-        Promise.resolve(streamGemini(key, systemPrompt, chatMessages))
+        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL))
       );
       return;
     }
   }
 
-  throw new Error("Koi bhi API key kaam nahi kar rahi. Apni OpenRouter/Groq/Gemini keys check karein.");
+  throw new Error("Koi bhi API key kaam nahi kar rahi. Apni keys check karein.");
 }
 
 // ─── Message endpoint ─────────────────────────────────────────────────────────
@@ -206,8 +227,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     await db.insert(messages).values({ conversationId: id, role: "user", content: body.content });
 
     const existingMessages = await db
-      .select()
-      .from(messages)
+      .select().from(messages)
       .where(eq(messages.conversationId, id))
       .orderBy(messages.createdAt);
 
@@ -227,13 +247,13 @@ router.post("/conversations/:id/messages", async (req, res) => {
     let fullResponse = "";
 
     try {
-      for await (const text of hybridStream(conversation.type, systemPrompt, chatMessages, req.log as typeof console)) {
+      for await (const text of hybridStream(conversation.type, systemPrompt, chatMessages, body.model, req.log as typeof console)) {
         fullResponse += text;
         res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
       }
     } catch (streamErr) {
-      req.log.error(streamErr, "Stream error in hybrid engine");
-      const errMsg = "\n\n⚠️ AI key limit aa gayi. Thodi der baad retry karein ya doosri key add karein.";
+      req.log.error(streamErr, "Stream error");
+      const errMsg = "\n\n⚠️ AI key limit aa gayi. Doosra model select karein ya thodi der baad retry karein.";
       res.write(`data: ${JSON.stringify({ content: errMsg })}\n\n`);
     }
 
@@ -257,42 +277,48 @@ router.post("/generate-image", async (req, res) => {
   try {
     const body = GenerateOpenaiImageBody.parse(req.body);
     const hfToken = process.env["HF_TOKEN"];
-
-    if (!hfToken) {
-      return res.status(400).json({ error: "HF_TOKEN set nahi hai. HuggingFace token add karein." });
-    }
-
+    if (!hfToken) return res.status(400).json({ error: "HF_TOKEN set nahi hai." });
     const b64 = await generateImageHuggingFace(body.prompt, hfToken);
     return res.json({ b64_json: b64, source: "huggingface" });
   } catch (err) {
     req.log.error(err, "Failed to generate image");
-    res.status(500).json({ error: "Image generation failed. HuggingFace token check karein." });
+    res.status(500).json({ error: "Image generation failed." });
   }
+});
+
+// ─── Models list endpoint ─────────────────────────────────────────────────────
+
+router.get("/models", (_req, res) => {
+  const orModels = hasOpenRouter()
+    ? Object.entries(OR_MODELS).map(([key, m]) => ({ key, ...m, provider_type: "openrouter" }))
+    : [];
+  const groqModels = hasKeys("GROQ_KEY")
+    ? Object.entries(GROQ_MODELS).map(([key, m]) => ({ key, ...m, provider_type: "groq" }))
+    : [];
+  const geminiModels = hasKeys("GEMINI_KEY")
+    ? Object.entries(GEMINI_MODELS).map(([key, m]) => ({ key, ...m, provider_type: "gemini" }))
+    : [];
+  res.json({ models: [...orModels, ...groqModels, ...geminiModels] });
 });
 
 // ─── Key status endpoint ──────────────────────────────────────────────────────
 
-router.get("/keys/status", (req, res) => {
+router.get("/keys/status", (_req, res) => {
   const geminiKeys: string[] = [];
   const groqKeys: string[] = [];
   for (let i = 1; i <= 3; i++) {
     if (process.env[`GEMINI_KEY_${i}`]) geminiKeys.push(`GEMINI_KEY_${i}`);
     if (process.env[`GROQ_KEY_${i}`]) groqKeys.push(`GROQ_KEY_${i}`);
   }
-  const hfToken = !!process.env["HF_TOKEN"];
-  const openrouter = !!process.env["OPENROUTER_API_KEY"];
   res.json({
-    openrouter: { configured: openrouter },
-    gemini: { count: geminiKeys.length, slots: geminiKeys },
-    groq: { count: groqKeys.length, slots: groqKeys },
-    huggingface: { configured: hfToken },
-    primary: openrouter ? "openrouter" : groqKeys.length > 0 ? "groq" : "gemini",
+    openrouter: { configured: hasOpenRouter(), models: Object.keys(OR_MODELS).length },
+    gemini: { count: geminiKeys.length, slots: geminiKeys, models: Object.keys(GEMINI_MODELS).length },
+    groq: { count: groqKeys.length, slots: groqKeys, models: Object.keys(GROQ_MODELS).length },
+    huggingface: { configured: !!process.env["HF_TOKEN"] },
+    total_models: Object.keys(OR_MODELS).length + Object.keys(GROQ_MODELS).length + Object.keys(GEMINI_MODELS).length,
     mode: "user-keys-only",
-    note: "Sirf aapki API keys use ho rahi hain — koi company backend nahi",
   });
 });
-
-// ─── Key health test ──────────────────────────────────────────────────────────
 
 router.post("/keys/test", async (req, res) => {
   try {
