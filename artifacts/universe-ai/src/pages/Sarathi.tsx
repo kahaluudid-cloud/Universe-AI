@@ -239,11 +239,13 @@ export default function Sarathi() {
   const { addItem: addCreativityItem } = useCreativityStore();
 
   const conversationId = match && params?.id ? parseInt(params.id, 10) : undefined;
+  const [pendingMsg, setPendingMsg] = useState("");
 
   const { data: conversations, isLoading: isLoadingHistory } = useListOpenaiConversations({ type: "sarathi" });
   const createConversation = useCreateOpenaiConversation();
 
-  const handleNewMessage = (content: string) => {
+  const handleNewMessage = useCallback((content: string) => {
+    setPendingMsg(content);
     const title = content.split(" ").slice(0, 5).join(" ") + "...";
     createConversation.mutate({ data: { title, type: "sarathi" } }, {
       onSuccess: (newConv) => {
@@ -251,7 +253,7 @@ export default function Sarathi() {
         setLocation(`/sarathi/${newConv.id}`);
       },
     });
-  };
+  }, [createConversation, queryClient, setLocation]);
 
   const handleDownloadPdf = useCallback((content: string) => {
     downloadAsPdf(content, "sarathi-textbook");
@@ -489,6 +491,8 @@ export default function Sarathi() {
             emptyStateContent={<EmptyState />}
             headerContent={<HeaderRight />}
             onNewMessage={handleNewMessage}
+            initialMessage={pendingMsg}
+            onInitialMessageSent={() => setPendingMsg("")}
             enableImageGen={true}
             messageRenderer={messageRenderer}
             systemPrompt={systemPrompt}

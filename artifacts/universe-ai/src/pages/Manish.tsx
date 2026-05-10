@@ -7,13 +7,14 @@ import { Heart, WifiOff, MessageSquare, Plus } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export default function Manish() {
   const [match, params] = useRoute("/manish/:id");
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingMsg, setPendingMsg] = useState("");
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -31,7 +32,8 @@ export default function Manish() {
   const { data: conversations, isLoading: isLoadingHistory } = useListOpenaiConversations({ type: "manish" });
   const createConversation = useCreateOpenaiConversation();
 
-  const handleNewMessage = (content: string) => {
+  const handleNewMessage = useCallback((content: string) => {
+    setPendingMsg(content);
     const title = content.split(' ').slice(0, 5).join(' ') + '...';
     createConversation.mutate({ data: { title, type: "manish" } }, {
       onSuccess: (newConv) => {
@@ -39,7 +41,7 @@ export default function Manish() {
         setLocation(`/manish/${newConv.id}`);
       }
     });
-  };
+  }, [createConversation, queryClient, setLocation]);
 
   const EmptyState = () => (
     <>
@@ -134,6 +136,8 @@ export default function Manish() {
             emptyStateContent={<EmptyState />}
             headerContent={<HeaderIndicator />}
             onNewMessage={handleNewMessage}
+            initialMessage={pendingMsg}
+            onInitialMessageSent={() => setPendingMsg("")}
             systemPrompt="You are Manish, a warm, empathetic, and supportive emotional AI companion part of the Universe AI platform. You listen carefully, validate feelings, and offer gentle encouragement. You talk like a close, caring friend."
           />
         </div>

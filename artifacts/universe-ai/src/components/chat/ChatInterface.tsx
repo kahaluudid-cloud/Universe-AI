@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, StopCircle, Bot, User, Copy, Check, Download, Image as ImageIcon } from "lucide-react";
+import { Send, StopCircle, Bot, User, Copy, Check, Download, Image as ImageIcon, Paperclip, Volume2, VolumeX, X, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChatStream, type ChatMessage } from "@/hooks/use-chat-stream";
@@ -20,6 +20,8 @@ export interface ChatInterfaceProps {
   onMessagesChange?: (messages: ChatMessage[]) => void;
   enableImageGen?: boolean;
   messageRenderer?: (msg: ChatMessage, brandBgClass: string) => React.ReactNode | null;
+  initialMessage?: string;
+  onInitialMessageSent?: () => void;
 }
 
 export function CopyButton({ text }: { text: string }) {
@@ -141,9 +143,15 @@ export function ChatInterface({
   onMessagesChange,
   enableImageGen = false,
   messageRenderer,
+  initialMessage,
+  onInitialMessageSent,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const prevConvIdRef = useRef<number | undefined>(undefined);
 
   const { data: conversation, isLoading: isLoadingHistory } = useGetOpenaiConversation(
     conversationId as number,
@@ -175,28 +183,48 @@ export function ChatInterface({
     }
   }, [messages, isStreaming]);
 
+  // Auto-send first message when a new conversation is created
+  useEffect(() => {
+    if (
+      initialMessage &&
+      conversationId &&
+      conversationId !== prevConvIdRef.current
+    ) {
+      prevConvIdRef.current = conversationId;
+      sendMessage(initialMessage, systemPrompt, model);
+      onInitialMessageSent?.();
+    }
+  }, [conversationId, initialMessage, sendMessage, systemPrompt, model, onInitialMessageSent]);
+
   const handleSubmit = useCallback(
     (e?: React.FormEvent) => {
       e?.preventDefault();
       const trimmed = input.trim();
-      if (!trimmed) return;
+      if (!trimmed && !attachedFile) return;
+
+      const baseContent = trimmed || (attachedFile ? `Please analyze this file: ${attachedFile.name}` : "");
+      const fullContent = attachedFile
+        ? `${baseContent}\n\n📎 **${attachedFile.name}**\n\`\`\`\n${attachedFile.content.slice(0, 8000)}\n\`\`\``
+        : baseContent;
 
       if (!conversationId && onNewMessage) {
-        onNewMessage(trimmed);
+        onNewMessage(fullContent);
         setInput("");
+        setAttachedFile(null);
         return;
       }
 
       if (isStreaming) stopStream();
 
-      if (enableImageGen && detectImageRequest(trimmed)) {
-        sendImageMessage(trimmed);
+      if (enableImageGen && detectImageRequest(fullContent)) {
+        sendImageMessage(fullContent);
       } else {
-        sendMessage(trimmed, systemPrompt, model);
+        sendMessage(fullContent, systemPrompt, model);
       }
       setInput("");
+      setAttachedFile(null);
     },
-    [input, conversationId, onNewMessage, isStreaming, stopStream, enableImageGen, sendImageMessage, sendMessage, systemPrompt, model]
+    [input, attachedFile, conversationId, onNewMessage, isStreaming, stopStream, enableImageGen, sendImageMessage, sendMessage, systemPrompt, model]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -206,17 +234,70 @@ export function ChatInterface({
     }
   };
 
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string;
+      setAttachedFile({ name: file.name, content });
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleVoice = () => {
+    if (!("speechSynthesis" in window)) return;
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+    const lastAssistant = [...messages].reverse().find(m => m.role === "assistant" && m.content);
+    if (!lastAssistant) return;
+    const cleanText = lastAssistant.content
+      .replace(/```[\s\S]*?```/g, " code block ")
+      .replace(/[#*`>_~]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = "hi-IN";
+    utterance.rate = 0.95;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  };
+
   const brandBgClass = {
     primary: "bg-primary/20 text-primary",
     secondary: "bg-secondary/20 text-secondary",
     accent: "bg-accent/20 text-accent",
   }[brandColor];
 
+  const voiceBtnColor = {
+    primary: isSpeaking ? "bg-primary/20 text-primary border-primary/40" : "border-border text-muted-foreground hover:text-primary hover:border-primary/40",
+    secondary: isSpeaking ? "bg-secondary/20 text-secondary border-secondary/40" : "border-border text-muted-foreground hover:text-secondary hover:border-secondary/40",
+    accent: isSpeaking ? "bg-accent/20 text-accent border-accent/40" : "border-border text-muted-foreground hover:text-accent hover:border-accent/40",
+  }[brandColor];
+
   return (
     <div className="flex flex-col h-full bg-background relative overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 bg-background/80 backdrop-blur-sm z-10 gap-4">
         <h1 className="text-xl font-bold text-white tracking-tight shrink-0">{title}</h1>
-        <div className="flex-1 flex justify-end">{headerContent}</div>
+        <div className="flex items-center gap-2 flex-1 justify-end">
+          {/* Voice / TTS button */}
+          <button
+            onClick={handleVoice}
+            title={isSpeaking ? "Bolna band karo" : "Last reply sunno"}
+            disabled={messages.filter(m => m.role === "assistant").length === 0}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed ${voiceBtnColor}`}
+          >
+            {isSpeaking ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{isSpeaking ? "Rokein" : "Sunein"}</span>
+          </button>
+          {headerContent}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4" ref={scrollRef}>
@@ -287,16 +368,48 @@ export function ChatInterface({
       </div>
 
       <div className="p-4 border-t border-border/50 absolute bottom-0 left-0 right-0 bg-background">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-4xl mx-auto space-y-2">
+          {/* Attached file preview */}
+          {attachedFile && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-card border border-border rounded-lg text-xs text-muted-foreground">
+              <FileText className="w-3.5 h-3.5 shrink-0 text-primary" />
+              <span className="flex-1 truncate">{attachedFile.name}</span>
+              <span className="text-[10px] text-muted-foreground/60">{(attachedFile.content.length / 1024).toFixed(1)}KB</span>
+              <button onClick={() => setAttachedFile(null)} className="hover:text-destructive transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <form
             onSubmit={handleSubmit}
             className="relative flex items-end gap-2 bg-card border border-border rounded-xl p-2 focus-within:ring-1 focus-within:ring-primary transition-all"
           >
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.md,.js,.ts,.tsx,.jsx,.py,.html,.css,.json,.csv,.xml,.yaml,.yml,.sh,.sql,.c,.cpp,.java,.go,.rs,.php"
+              className="hidden"
+              onChange={handleFileAttach}
+            />
+
+            {/* Attach button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              title="File attach karo"
+              className="p-2 text-muted-foreground hover:text-primary transition-colors shrink-0 rounded-lg hover:bg-primary/10"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+
             {enableImageGen && (
-              <div className="p-3 text-muted-foreground shrink-0">
+              <div className="p-2 text-muted-foreground shrink-0">
                 <ImageIcon className="w-4 h-4" />
               </div>
             )}
+
             <Textarea
               value={input}
               onChange={e => setInput(e.target.value)}
@@ -308,13 +421,13 @@ export function ChatInterface({
               type={isStreaming ? "button" : "submit"}
               size="icon"
               onClick={isStreaming ? stopStream : undefined}
-              disabled={!isStreaming && !input.trim()}
+              disabled={!isStreaming && !input.trim() && !attachedFile}
               className={`shrink-0 h-10 w-10 rounded-lg mb-1 mr-1 ${isStreaming ? "bg-destructive hover:bg-destructive/80" : ""}`}
             >
               {isStreaming ? <StopCircle className="h-5 w-5" /> : <Send className="h-5 w-5" />}
             </Button>
           </form>
-          <p className="text-center mt-2 text-xs text-muted-foreground">
+          <p className="text-center mt-1 text-xs text-muted-foreground">
             {isStreaming
               ? "Press Stop or type a new message to interrupt."
               : "Universe AI · Built by Manish Kumar Chaturvedi"}

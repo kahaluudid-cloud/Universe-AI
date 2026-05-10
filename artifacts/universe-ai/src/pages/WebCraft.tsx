@@ -257,12 +257,15 @@ export default function WebCraft() {
     }
   }, [showLive, previewHtml]);
 
-  const handleNewMessage = (content: string) => {
+  const [pendingMsg, setPendingMsg] = useState("");
+
+  const handleNewMessage = useCallback((content: string) => {
+    setPendingMsg(content);
     const title = content.split(" ").slice(0, 5).join(" ") + "...";
     createConversation.mutate({ data: { title, type: "sarathi" } }, {
       onSuccess: newConv => setLocation(`/webcraft/${newConv.id}`),
     });
-  };
+  }, [createConversation, setLocation]);
 
   const handleDownloadZip = async () => {
     if (!hasFiles) return;
@@ -442,6 +445,8 @@ export default function WebCraft() {
             emptyStateContent={<EmptyState />}
             headerContent={<HeaderMenu />}
             onNewMessage={handleNewMessage}
+            initialMessage={pendingMsg}
+            onInitialMessageSent={() => setPendingMsg("")}
             onMessagesChange={setMessages}
             messageRenderer={messageRenderer}
             systemPrompt={`You are WebCraft Pro — Universe AI's silent background developer engine.
