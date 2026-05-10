@@ -72,7 +72,7 @@ export async function* streamOpenRouter(
     body: JSON.stringify({
       model: modelId,
       messages: [{ role: "system", content: systemPrompt }, ...messages],
-      max_tokens: 8192,
+      max_tokens: 2048,
       stream: true,
     }),
   });

@@ -235,10 +235,12 @@ router.post("/conversations/:id/messages", async (req, res) => {
       body.systemPrompt ||
       (conversation.type === "manish" ? MANISH_SYSTEM_PROMPT : SARATHI_SYSTEM_PROMPT);
 
-    const chatMessages: MsgRole[] = existingMessages.map((m) => ({
+    const allChatMessages: MsgRole[] = existingMessages.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     }));
+    // Sirf last 10 messages bhejna — tokens bachao, rate limit se bachao
+    const chatMessages = allChatMessages.slice(-10);
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
