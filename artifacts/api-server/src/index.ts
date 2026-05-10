@@ -1,3 +1,11 @@
+import { config } from "dotenv";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Load .env from api-server root (development mein kaam karega)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: resolve(__dirname, "../.env") });
+
 import app from "./app";
 import { logger } from "./lib/logger";
 
