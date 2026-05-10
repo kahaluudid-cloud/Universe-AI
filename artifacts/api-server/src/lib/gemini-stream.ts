@@ -34,7 +34,8 @@ export async function* streamGemini(
   key: string,
   systemPrompt: string,
   messages: GeminiMessage[],
-  modelKey = DEFAULT_GEMINI_MODEL
+  modelKey = DEFAULT_GEMINI_MODEL,
+  maxTokens = 2048
 ): AsyncGenerator<string> {
   const modelId = getGeminiModelId(modelKey);
 
@@ -51,7 +52,7 @@ export async function* streamGemini(
     body: JSON.stringify({
       contents,
       systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: { maxOutputTokens: 2048, temperature: 0.7 },
+      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
     }),
   });
 

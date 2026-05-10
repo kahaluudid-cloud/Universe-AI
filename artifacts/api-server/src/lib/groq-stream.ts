@@ -33,7 +33,8 @@ export async function* streamGroq(
   key: string,
   systemPrompt: string,
   messages: ChatMessage[],
-  modelKey = DEFAULT_GROQ_MODEL
+  modelKey = DEFAULT_GROQ_MODEL,
+  maxTokens = 2048
 ): AsyncGenerator<string> {
   const modelId = getGroqModelId(modelKey);
 
@@ -46,7 +47,7 @@ export async function* streamGroq(
     body: JSON.stringify({
       model: modelId,
       messages: [{ role: "system", content: systemPrompt }, ...messages],
-      max_tokens: 2048,
+      max_tokens: maxTokens,
       temperature: 0.8,
       stream: true,
     }),

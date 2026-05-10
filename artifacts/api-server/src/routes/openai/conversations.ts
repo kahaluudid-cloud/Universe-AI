@@ -112,16 +112,31 @@ function getOpenRouterKey(): string {
   return k;
 }
 
+// ─── Smart maxTokens detection ────────────────────────────────────────────────
+const LONG_FORM_KEYWORDS = [
+  "textbook", "text book", "kitaab", "kitab", "500 page", "1000 page",
+  "ppt", "presentation", "powerpoint", "slide", "slides",
+  "write a book", "write book", "ek book", "ek kitaab",
+  "chapter", "chapters", "volume", "encyclopedia",
+];
+
+function detectMaxTokens(content: string): number {
+  const lower = content.toLowerCase();
+  if (LONG_FORM_KEYWORDS.some(kw => lower.includes(kw))) return 8192;
+  return 2048;
+}
+
 async function* routeToModel(
   modelKey: string,
   systemPrompt: string,
   chatMessages: MsgRole[],
-  log: typeof console
+  log: typeof console,
+  maxTokens = 2048
 ): AsyncGenerator<string> {
   // ── OpenRouter models ──
   if (modelKey.startsWith("or:") || modelKey in OR_MODELS) {
     if (!hasOpenRouter()) throw new Error("OPENROUTER_API_KEY not configured");
-    yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, modelKey);
+    yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, modelKey, maxTokens);
     return;
   }
 
@@ -129,7 +144,7 @@ async function* routeToModel(
   if (modelKey.startsWith("groq:") || modelKey in GROQ_MODELS) {
     if (!hasKeys("GROQ_KEY")) throw new Error("GROQ_KEY not configured");
     yield* await withKeyRotation("GROQ_KEY", (key) =>
-      Promise.resolve(streamGroq(key, systemPrompt, chatMessages, modelKey))
+      Promise.resolve(streamGroq(key, systemPrompt, chatMessages, modelKey, maxTokens))
     );
     return;
   }
@@ -138,7 +153,7 @@ async function* routeToModel(
   if (modelKey.startsWith("gemini:") || modelKey in GEMINI_MODELS) {
     if (!hasKeys("GEMINI_KEY")) throw new Error("GEMINI_KEY not configured");
     yield* await withKeyRotation("GEMINI_KEY", (key) =>
-      Promise.resolve(streamGemini(key, systemPrompt, chatMessages, modelKey))
+      Promise.resolve(streamGemini(key, systemPrompt, chatMessages, modelKey, maxTokens))
     );
     return;
   }
@@ -151,12 +166,13 @@ async function* hybridStream(
   systemPrompt: string,
   chatMessages: MsgRole[],
   modelKey: string | undefined,
-  log: typeof console
+  log: typeof console,
+  maxTokens = 2048
 ): AsyncGenerator<string> {
   // ── If user picked a specific model, use it directly — no fallback ─────────
   if (modelKey && modelKey !== "auto") {
     try {
-      yield* routeToModel(modelKey, systemPrompt, chatMessages, log);
+      yield* routeToModel(modelKey, systemPrompt, chatMessages, log, maxTokens);
       return;
     } catch (err) {
       log.warn?.(`Model ${modelKey} failed, falling back to auto:`, err);
@@ -174,7 +190,7 @@ async function* hybridStream(
   if (isManish && hasKeys("GROQ_KEY")) {
     try {
       yield* await withKeyRotation("GROQ_KEY", (key) =>
-        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
+        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL, maxTokens))
       );
       return;
     } catch (err) {
@@ -184,7 +200,7 @@ async function* hybridStream(
   }
   if (!isManish && hasOpenRouter()) {
     try {
-      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, DEFAULT_OR_MODEL);
+      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, DEFAULT_OR_MODEL, maxTokens);
       return;
     } catch (err) {
       errors.push(`OpenRouter: ${err}`);
@@ -195,7 +211,7 @@ async function* hybridStream(
   // 2. OpenRouter (Manish) / Groq (Sarathi)
   if (isManish && hasOpenRouter()) {
     try {
-      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, "or:llama-70b");
+      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, "or:llama-70b", maxTokens);
       return;
     } catch (err) {
       errors.push(`OpenRouter: ${err}`);
@@ -205,7 +221,7 @@ async function* hybridStream(
   if (!isManish && hasKeys("GROQ_KEY")) {
     try {
       yield* await withKeyRotation("GROQ_KEY", (key) =>
-        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL))
+        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL, maxTokens))
       );
       return;
     } catch (err) {
@@ -218,7 +234,7 @@ async function* hybridStream(
   if (hasKeys("GEMINI_KEY")) {
     try {
       yield* await withKeyRotation("GEMINI_KEY", (key) =>
-        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL))
+        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL, maxTokens))
       );
       return;
     } catch (err) {
@@ -260,6 +276,9 @@ router.post("/conversations/:id/messages", async (req, res) => {
     // Sirf last 10 messages bhejna — tokens bachao, rate limit se bachao
     const chatMessages = allChatMessages.slice(-10);
 
+    // Auto-detect long-form requests (textbook/ppt) → 8192 tokens; else use provided or default
+    const maxTokens = body.maxTokens ?? detectMaxTokens(body.content);
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -267,7 +286,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     let fullResponse = "";
 
     try {
-      for await (const text of hybridStream(conversation.type, systemPrompt, chatMessages, body.model, req.log as typeof console)) {
+      for await (const text of hybridStream(conversation.type, systemPrompt, chatMessages, body.model, req.log as typeof console, maxTokens)) {
         fullResponse += text;
         res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
       }

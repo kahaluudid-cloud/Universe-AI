@@ -135,7 +135,8 @@ function SarathiMessageRenderer(
   msg: ChatMessage,
   brandBgClass: string,
   onDownloadPdf: (content: string) => void,
-  onDownloadPpt: (content: string) => void
+  onDownloadPpt: (content: string) => void,
+  onContinue: (prompt: string) => void
 ): React.ReactNode | null {
   if (msg.role === "user") {
     return (
@@ -156,6 +157,8 @@ function SarathiMessageRenderer(
     const wordCount = msg.content.split(/\s+/).length;
     const chapterCount = (msg.content.match(/^##\s+chapter/gim) || []).length;
     const pageEst = Math.ceil(wordCount / 250);
+    const lastChapter = msg.content.match(/^##\s+chapter\s+(\d+)/gim);
+    const lastChapterNum = lastChapter ? parseInt(lastChapter[lastChapter.length - 1].match(/\d+/)?.[0] || "0") : 0;
 
     return (
       <div className="flex gap-3 justify-start">
@@ -164,7 +167,7 @@ function SarathiMessageRenderer(
         </div>
         <div className="flex-1 max-w-[85%] space-y-2">
           <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-card border border-border text-sm">
-            <MessageContent content={msg.content.slice(0, 300) + (msg.content.length > 300 ? "…" : "")} />
+            <MessageContent content={msg.content.slice(0, 400) + (msg.content.length > 400 ? "…" : "")} />
           </div>
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
             <div className="flex items-center gap-2">
@@ -178,13 +181,25 @@ function SarathiMessageRenderer(
               <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-primary" />{chapterCount || "Multiple"} chapters</span>
               <span>{wordCount.toLocaleString()} words</span>
             </div>
-            <Button
-              size="sm"
-              onClick={() => onDownloadPdf(msg.content)}
-              className="gap-2 text-xs bg-primary hover:bg-primary/90 h-8"
-            >
-              <Download className="w-3.5 h-3.5" /> Download PDF Textbook
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => onDownloadPdf(msg.content)}
+                className="gap-2 text-xs bg-primary hover:bg-primary/90 h-8"
+              >
+                <Download className="w-3.5 h-3.5" /> Download PDF Textbook
+              </Button>
+              {lastChapterNum > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onContinue(`Aage likho — Chapter ${lastChapterNum + 1} se continue karo. Usi book ka part 2 likho with same style aur format.`)}
+                  className="gap-2 text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Aage Likho (Ch.{lastChapterNum + 1}+)
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -193,6 +208,8 @@ function SarathiMessageRenderer(
 
   if (contentType === "ppt") {
     const slideCount = (msg.content.match(/^##\s+slide\s+\d+/gim) || []).length;
+    const lastSlide = msg.content.match(/^##\s+slide\s+(\d+)/gim);
+    const lastSlideNum = lastSlide ? parseInt(lastSlide[lastSlide.length - 1].match(/\d+/)?.[0] || "0") : 0;
 
     return (
       <div className="flex gap-3 justify-start">
@@ -201,7 +218,7 @@ function SarathiMessageRenderer(
         </div>
         <div className="flex-1 max-w-[85%] space-y-2">
           <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-card border border-border text-sm">
-            <MessageContent content={msg.content.slice(0, 250) + (msg.content.length > 250 ? "…" : "")} />
+            <MessageContent content={msg.content.slice(0, 300) + (msg.content.length > 300 ? "…" : "")} />
           </div>
           <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 space-y-3">
             <div className="flex items-center gap-2">
@@ -214,13 +231,25 @@ function SarathiMessageRenderer(
             <p className="text-xs text-muted-foreground">
               Arrow keys se navigate karo · Full-screen presentation
             </p>
-            <Button
-              size="sm"
-              onClick={() => onDownloadPpt(msg.content)}
-              className="gap-2 text-xs bg-accent text-accent-foreground hover:bg-accent/90 h-8"
-            >
-              <Download className="w-3.5 h-3.5" /> Download Presentation
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => onDownloadPpt(msg.content)}
+                className="gap-2 text-xs bg-accent text-accent-foreground hover:bg-accent/90 h-8"
+              >
+                <Download className="w-3.5 h-3.5" /> Download Presentation (.html)
+              </Button>
+              {lastSlideNum > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onContinue(`Slide ${lastSlideNum + 1} se aage aur slides banao. Same topic aur format continue karo.`)}
+                  className="gap-2 text-xs h-8 border-accent/30 text-accent hover:bg-accent/10"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Aur Slides (#{lastSlideNum + 1}+)
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -291,10 +320,14 @@ export default function Sarathi() {
     });
   }, [addNotification, addCreativityItem]);
 
+  const handleContinue = useCallback((prompt: string) => {
+    handleNewMessage(prompt);
+  }, [handleNewMessage]);
+
   const messageRenderer = useCallback(
     (msg: ChatMessage, brandBgClass: string) =>
-      SarathiMessageRenderer(msg, brandBgClass, handleDownloadPdf, handleDownloadPpt),
-    [handleDownloadPdf, handleDownloadPpt]
+      SarathiMessageRenderer(msg, brandBgClass, handleDownloadPdf, handleDownloadPpt, handleContinue),
+    [handleDownloadPdf, handleDownloadPpt, handleContinue]
   );
 
   const systemPrompt = `Aap Sarathi hain — Universe AI ka advanced brain. Model: ${selectedModel.name} (${selectedModel.group}).\n\n${BASE_SYSTEM}`;

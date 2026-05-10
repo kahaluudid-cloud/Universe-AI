@@ -7,6 +7,19 @@ export interface ChatMessage {
   imageB64?: string;
 }
 
+const LONG_FORM_KEYWORDS = [
+  "textbook", "text book", "kitaab", "kitab", "500 page", "1000 page",
+  "ppt", "presentation", "powerpoint", "slide", "slides",
+  "write a book", "write book", "ek book", "ek kitaab",
+  "chapter", "chapters", "volume", "encyclopedia", "aage likho", "continue",
+];
+
+function detectMaxTokens(content: string): number {
+  const lower = content.toLowerCase();
+  if (LONG_FORM_KEYWORDS.some(kw => lower.includes(kw))) return 8192;
+  return 2048;
+}
+
 export function useChatStream(conversationId?: number) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -40,13 +53,15 @@ export function useChatStream(conversationId?: number) {
     const assistantMsgId = `asst-${Date.now()}`;
     setMessages(prev => [...prev, { id: assistantMsgId, role: "assistant", content: "" }]);
 
+    const maxTokens = detectMaxTokens(content);
+
     try {
       const response = await fetch(
         `${import.meta.env.BASE_URL}api/openai/conversations/${conversationId}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, systemPrompt, model }),
+          body: JSON.stringify({ content, systemPrompt, model, maxTokens }),
           signal: abortController.signal,
         }
       );

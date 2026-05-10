@@ -99,6 +99,7 @@ export const SendOpenaiMessageBody = zod.object({
   content: zod.string(),
   systemPrompt: zod.string().optional(),
   model: zod.string().optional(),
+  maxTokens: zod.number().optional(),
 });
 
 /**

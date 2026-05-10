@@ -57,7 +57,8 @@ export async function* streamOpenRouter(
   apiKey: string,
   systemPrompt: string,
   messages: ChatMessage[],
-  modelKey = DEFAULT_OR_MODEL
+  modelKey = DEFAULT_OR_MODEL,
+  maxTokens = 2048
 ): AsyncGenerator<string> {
   const modelId = getORModelId(modelKey);
 
@@ -72,7 +73,7 @@ export async function* streamOpenRouter(
     body: JSON.stringify({
       model: modelId,
       messages: [{ role: "system", content: systemPrompt }, ...messages],
-      max_tokens: 2048,
+      max_tokens: maxTokens,
       stream: true,
     }),
   });
