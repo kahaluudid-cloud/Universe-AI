@@ -14,9 +14,9 @@ interface ORChunk {
 
 // ─── All free OpenRouter models ───────────────────────────────────────────────
 export const OR_MODELS: Record<string, { id: string; name: string; provider: string; tag: string }> = {
-  // Google Gemini (via OpenRouter)
-  "or:gemini-flash":     { id: "google/gemini-2.0-flash-exp:free",          name: "Gemini 2.0 Flash",    provider: "Google",    tag: "Fast" },
-  "or:gemini-pro":       { id: "google/gemini-2.5-pro-exp-03-25:free",       name: "Gemini 2.5 Pro",      provider: "Google",    tag: "Smart" },
+  // Google Gemini (via OpenRouter) — updated stable IDs
+  "or:gemini-flash":     { id: "google/gemini-2.0-flash:free",               name: "Gemini 2.0 Flash",    provider: "Google",    tag: "Fast" },
+  "or:gemini-pro":       { id: "google/gemini-2.5-pro-preview:free",          name: "Gemini 2.5 Pro",      provider: "Google",    tag: "Smart" },
 
   // DeepSeek (via OpenRouter)
   "or:deepseek-r1":      { id: "deepseek/deepseek-r1:free",                  name: "DeepSeek R1",         provider: "DeepSeek",  tag: "Reasoning" },
@@ -47,7 +47,8 @@ export const OR_MODELS: Record<string, { id: string; name: string; provider: str
   "or:openchat":         { id: "openchat/openchat-7b:free",                  name: "OpenChat 7B",         provider: "OpenChat",  tag: "Chat" },
 };
 
-export const DEFAULT_OR_MODEL = "or:gemini-flash";
+// Default = Llama 70B — most stable free model on OpenRouter
+export const DEFAULT_OR_MODEL = "or:llama-70b";
 
 export function getORModelId(key: string): string {
   return OR_MODELS[key]?.id ?? OR_MODELS[DEFAULT_OR_MODEL].id;

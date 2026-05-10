@@ -7,9 +7,10 @@
  * - Keys re-read from env every 6 hours (hot-reload support)
  */
 
-const RATE_LIMIT_COOLDOWN_MS = 60_000;   // 60s cooldown after 429
+const RATE_LIMIT_COOLDOWN_MS = 60_000;        // 60s cooldown after 429
+const DAILY_LIMIT_COOLDOWN_MS = 60 * 60 * 1000; // 1h cooldown after daily quota (403/429-daily)
 const KEY_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // re-read env every 6h
-const MAX_WAIT_MS = 90_000;              // max 90s wait if all keys exhausted
+const MAX_WAIT_MS = 90_000;                   // max 90s wait if all keys exhausted
 
 function readKeys(prefix: string): string[] {
   const keys: string[] = [];
@@ -100,11 +101,16 @@ export async function withKeyRotation<T>(
           (err as { response?: { status: number } })?.response?.status;
 
         if (status === 429 || status === 503) {
-          pool.rateLimitedUntil.set(key, Date.now() + RATE_LIMIT_COOLDOWN_MS);
+          // Check if it's a daily/quota limit (longer cooldown) or per-minute (short cooldown)
+          const errMsg = String((err as { message?: string })?.message ?? "");
+          const isDaily = errMsg.includes("tokens per day") || errMsg.includes("per day") || errMsg.includes("quota") || errMsg.includes("exceeded");
+          const cooldown = isDaily ? DAILY_LIMIT_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS;
+          pool.rateLimitedUntil.set(key, Date.now() + cooldown);
           pool.currentIndex = (idx + 1) % pool.keys.length;
           continue;
         }
-        if (status === 500) {
+        if (status === 500 || status === 404) {
+          // 404 = model removed/unavailable; 500 = server error — skip this key
           pool.currentIndex = (idx + 1) % pool.keys.length;
           continue;
         }
