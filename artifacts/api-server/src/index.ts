@@ -1,10 +1,25 @@
-import { config } from "dotenv";
+import { parse } from "dotenv";
+import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Load .env from api-server root (development mein kaam karega)
+// .env se keys load karo — sirf non-empty values override hongi (Replit Secrets fallback rehta hai)
 const __dirname = dirname(fileURLToPath(import.meta.url));
-config({ path: resolve(__dirname, "../.env") });
+try {
+  const envPath = resolve(__dirname, "../.env");
+  const envContent = readFileSync(envPath, "utf8");
+  const parsed = parse(envContent);
+  let loaded = 0;
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value && value.trim() !== "") {
+      process.env[key] = value;
+      loaded++;
+    }
+  }
+  if (loaded > 0) console.log(`◇ .env se ${loaded} keys load hui`);
+} catch {
+  // .env nahi mili — Replit Secrets use hongi
+}
 
 import app from "./app";
 import { logger } from "./lib/logger";
