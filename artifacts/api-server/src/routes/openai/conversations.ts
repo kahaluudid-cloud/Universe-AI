@@ -69,6 +69,22 @@ router.delete("/conversations/:id", async (req, res) => {
   }
 });
 
+// ── Bulk delete all conversations ─────────────────────────────────────────────
+router.delete("/conversations", async (req, res) => {
+  try {
+    const type = req.query.type as string | undefined;
+    if (type) {
+      await db.delete(conversations).where(eq(conversations.type, type));
+    } else {
+      await db.delete(conversations);
+    }
+    res.status(204).send();
+  } catch (err) {
+    req.log.error(err, "Failed to bulk delete conversations");
+    res.status(500).json({ error: "Failed to delete all conversations" });
+  }
+});
+
 router.get("/conversations/:id/messages", async (req, res) => {
   try {
     const { id } = ListOpenaiMessagesParams.parse(req.params);

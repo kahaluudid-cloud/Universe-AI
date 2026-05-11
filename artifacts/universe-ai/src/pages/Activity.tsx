@@ -258,6 +258,16 @@ export default function Activity() {
     }
   };
 
+  const handleClearAllHistory = async () => {
+    if (!confirm("Poori chat history delete ho jayegi. Pakka?")) return;
+    try {
+      await fetch("/api/openai/conversations", { method: "DELETE" });
+      queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+    } catch {
+      alert("Delete nahi hua, dobara try karo.");
+    }
+  };
+
   return (
     <Shell>
       <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -323,6 +333,20 @@ export default function Activity() {
               <p className="text-muted-foreground">No conversations found.</p>
             </div>
           ) : (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-xs text-muted-foreground">
+                  {filteredConversations.length} conversation{filteredConversations.length !== 1 ? "s" : ""}
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs text-muted-foreground hover:text-destructive gap-1.5 h-7"
+                  onClick={handleClearAllHistory}
+                >
+                  <Trash2 className="w-3 h-3" /> Clear All History
+                </Button>
+              </div>
             <div className="space-y-8">
               {Object.entries(grouped).map(([date, convs]) => (
                 <div key={date}>
@@ -374,6 +398,7 @@ export default function Activity() {
                 </div>
               ))}
             </div>
+            </>
           )
         )}
 
