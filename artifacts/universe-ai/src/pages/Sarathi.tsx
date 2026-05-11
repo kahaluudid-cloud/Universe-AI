@@ -9,20 +9,11 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Bot, MessageSquare, Plus, Image as ImageIcon, BookOpen,
-  Presentation, ChevronDown, Sparkles, Download, User, Check,
-  Cpu, Zap,
+  Presentation, Sparkles, Download, User, Zap, Cpu,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useState, useCallback } from "react";
 import { type ChatMessage } from "@/hooks/use-chat-stream";
 import { MessageContent } from "@/components/chat/ChatInterface";
@@ -30,68 +21,6 @@ import { downloadAsPdf } from "@/lib/download-pdf";
 import { downloadAsPpt } from "@/lib/download-ppt";
 import { useNotifications } from "@/contexts/notifications";
 import { useCreativityStore } from "@/contexts/creativity-store";
-
-// ─── All real free models, grouped by provider ────────────────────────────────
-export interface ModelDef {
-  id: string;       // model key sent to backend (e.g. "or:gemini-flash")
-  name: string;     // display name
-  label: string;    // subtitle
-  color: string;
-  icon: string;     // 1-2 letters
-  tag: string;
-  group: string;    // provider group label
-}
-
-const MODELS: ModelDef[] = [
-  // ── OpenRouter — Google ──────────────────────────────────────────────────
-  { id: "or:gemini-flash", name: "Gemini 2.0 Flash",    label: "Google via OpenRouter",  color: "#4285f4", icon: "G",  tag: "Fast",      group: "OpenRouter" },
-  { id: "or:gemini-pro",   name: "Gemini 2.5 Pro",      label: "Google via OpenRouter",  color: "#34a853", icon: "G+", tag: "Smart",     group: "OpenRouter" },
-
-  // ── OpenRouter — DeepSeek ────────────────────────────────────────────────
-  { id: "or:deepseek-r1",  name: "DeepSeek R1",         label: "DeepSeek via OpenRouter",color: "#7c3aed", icon: "DR", tag: "Reasoning", group: "OpenRouter" },
-  { id: "or:deepseek-v3",  name: "DeepSeek V3",         label: "DeepSeek via OpenRouter",color: "#6d28d9", icon: "D3", tag: "Chat",      group: "OpenRouter" },
-
-  // ── OpenRouter — Meta Llama ──────────────────────────────────────────────
-  { id: "or:llama-70b",    name: "Llama 3.3 70B",       label: "Meta via OpenRouter",    color: "#0ea5e9", icon: "L",  tag: "Open",      group: "OpenRouter" },
-  { id: "or:llama-8b",     name: "Llama 3.1 8B",        label: "Meta via OpenRouter",    color: "#0284c7", icon: "L8", tag: "Light",     group: "OpenRouter" },
-
-  // ── OpenRouter — Mistral ─────────────────────────────────────────────────
-  { id: "or:mistral-7b",   name: "Mistral 7B",          label: "Mistral via OpenRouter", color: "#f59e0b", icon: "M",  tag: "Efficient", group: "OpenRouter" },
-  { id: "or:mistral-small",name: "Mistral Small 24B",   label: "Mistral via OpenRouter", color: "#d97706", icon: "MS", tag: "Balanced",  group: "OpenRouter" },
-
-  // ── OpenRouter — Qwen (Alibaba) ──────────────────────────────────────────
-  { id: "or:qwen3-235b",   name: "Qwen3 235B",          label: "Alibaba via OpenRouter", color: "#dc2626", icon: "Q",  tag: "Huge",      group: "OpenRouter" },
-  { id: "or:qwen3-30b",    name: "Qwen3 30B",           label: "Alibaba via OpenRouter", color: "#b91c1c", icon: "Q3", tag: "Large",     group: "OpenRouter" },
-  { id: "or:qwen3-14b",    name: "Qwen3 14B",           label: "Alibaba via OpenRouter", color: "#ef4444", icon: "Q1", tag: "Medium",    group: "OpenRouter" },
-  { id: "or:qwen3-8b",     name: "Qwen3 8B",            label: "Alibaba via OpenRouter", color: "#f87171", icon: "Q8", tag: "Light",     group: "OpenRouter" },
-
-  // ── OpenRouter — Microsoft Phi ───────────────────────────────────────────
-  { id: "or:phi3-mini",    name: "Phi-3 Mini 128K",     label: "Microsoft via OpenRouter",color: "#0078d4",icon: "Ph", tag: "Tiny",      group: "OpenRouter" },
-  { id: "or:phi3-medium",  name: "Phi-3 Medium 128K",   label: "Microsoft via OpenRouter",color: "#005a9e",icon: "PM", tag: "Medium",    group: "OpenRouter" },
-
-  // ── OpenRouter — Others ──────────────────────────────────────────────────
-  { id: "or:hermes-405b",  name: "Hermes 3 405B",       label: "Nous via OpenRouter",    color: "#7e22ce", icon: "H",  tag: "Giant",     group: "OpenRouter" },
-  { id: "or:openchat",     name: "OpenChat 7B",         label: "via OpenRouter",         color: "#64748b", icon: "OC", tag: "Chat",      group: "OpenRouter" },
-
-  // ── Groq ─────────────────────────────────────────────────────────────────
-  { id: "groq:llama3.3-70b", name: "Llama 3.3 70B",    label: "Meta via Groq",          color: "#f97316", icon: "GL", tag: "Best",      group: "Groq" },
-  { id: "groq:llama3.1-8b",  name: "Llama 3.1 8B",     label: "Meta via Groq",          color: "#fb923c", icon: "G8", tag: "Fastest",   group: "Groq" },
-  { id: "groq:llama3-70b",   name: "Llama 3 70B",      label: "Meta via Groq",          color: "#ea580c", icon: "G7", tag: "Smart",     group: "Groq" },
-  { id: "groq:llama3-8b",    name: "Llama 3 8B",       label: "Meta via Groq",          color: "#9a3412", icon: "G3", tag: "Light",     group: "Groq" },
-  { id: "groq:gemma2-9b",    name: "Gemma 2 9B",       label: "Google via Groq",        color: "#16a34a", icon: "Gm", tag: "Google",    group: "Groq" },
-  { id: "groq:mixtral-8x7b", name: "Mixtral 8x7B",     label: "Mistral via Groq",       color: "#ca8a04", icon: "Mx", tag: "MoE",       group: "Groq" },
-  { id: "groq:deepseek-r1",  name: "DeepSeek R1",      label: "DeepSeek via Groq",      color: "#9333ea", icon: "GR", tag: "Reasoning", group: "Groq" },
-
-  // ── Gemini Direct ─────────────────────────────────────────────────────────
-  { id: "gemini:2.0-flash",      name: "Gemini 2.0 Flash",      label: "Google Gemini Direct", color: "#4285f4", icon: "Gf", tag: "Fast",     group: "Gemini" },
-  { id: "gemini:2.0-flash-lite", name: "Gemini 2.0 Flash Lite", label: "Google Gemini Direct", color: "#1a73e8", icon: "GL", tag: "Lightest",  group: "Gemini" },
-  { id: "gemini:1.5-flash",      name: "Gemini 1.5 Flash",      label: "Google Gemini Direct", color: "#0d47a1", icon: "G5", tag: "Stable",   group: "Gemini" },
-  { id: "gemini:1.5-flash-8b",   name: "Gemini 1.5 Flash 8B",   label: "Google Gemini Direct", color: "#1565c0", icon: "G8", tag: "Tiny",     group: "Gemini" },
-  { id: "gemini:1.5-pro",        name: "Gemini 1.5 Pro",        label: "Google Gemini Direct", color: "#0a3d91", icon: "GP", tag: "Smart",    group: "Gemini" },
-];
-
-// Group labels for the dropdown
-const MODEL_GROUPS = ["OpenRouter", "Groq", "Gemini"] as const;
 
 const BASE_SYSTEM = `Aap Universe AI ke Sarathi hain — ek advanced AI brain jo coding, research, image generation, aur academic writing mein expert hai.
 
@@ -263,7 +192,6 @@ export default function Sarathi() {
   const [match, params] = useRoute("/sarathi/:id");
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
   const { addNotification } = useNotifications();
   const { addItem: addCreativityItem } = useCreativityStore();
 
@@ -330,78 +258,16 @@ export default function Sarathi() {
     [handleDownloadPdf, handleDownloadPpt, handleContinue]
   );
 
-  const systemPrompt = `Aap Sarathi hain — Universe AI ka advanced brain. Model: ${selectedModel.name} (${selectedModel.group}).\n\n${BASE_SYSTEM}`;
-
-  const ModelSelector = () => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2 h-8 text-xs border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary"
-        >
-          <div
-            className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold text-[9px]"
-            style={{ background: selectedModel.color }}
-          >
-            {selectedModel.icon}
-          </div>
-          <span className="hidden sm:inline">{selectedModel.name}</span>
-          <Badge variant="outline" className="text-[10px] border-primary/20 text-primary/70 px-1 h-4 hidden sm:flex">
-            {selectedModel.tag}
-          </Badge>
-          <ChevronDown className="w-3 h-3 opacity-60" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="bg-card border-border w-60 max-h-[70vh] overflow-y-auto">
-        <div className="px-3 py-2 text-xs text-muted-foreground font-medium flex items-center gap-2 sticky top-0 bg-card z-10 border-b border-border">
-          <Cpu className="w-3 h-3" /> Select AI Model ({MODELS.length} free models)
-        </div>
-        {MODEL_GROUPS.map(group => (
-          <div key={group}>
-            <div className="px-3 py-1.5 text-[10px] font-semibold text-primary/60 uppercase tracking-wider bg-primary/5 sticky top-8 z-10">
-              {group}
-            </div>
-            {MODELS.filter(m => m.group === group).map(model => (
-              <DropdownMenuItem
-                key={model.id}
-                className="gap-3 cursor-pointer py-2 focus:bg-primary/10"
-                onClick={() => setSelectedModel(model)}
-              >
-                <div
-                  className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0"
-                  style={{ background: model.color }}
-                >
-                  {model.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm text-white font-medium truncate">{model.name}</span>
-                    <span className="text-[9px] text-muted-foreground bg-white/5 px-1 py-0.5 rounded shrink-0">{model.tag}</span>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground truncate block">{model.label}</span>
-                </div>
-                {selectedModel.id === model.id && (
-                  <Check className="w-4 h-4 text-primary shrink-0" />
-                )}
-              </DropdownMenuItem>
-            ))}
-          </div>
-        ))}
-        <div className="px-3 py-2 text-[10px] text-muted-foreground border-t border-border sticky bottom-0 bg-card">
-          Sirf aapki API keys — koi company backend nahi
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-
   const HeaderRight = () => (
     <div className="flex items-center gap-2">
       <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary">
         <Sparkles className="w-3 h-3" />
         <span>Image Gen · PDF · PPT</span>
       </div>
-      <ModelSelector />
+      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-xs text-green-400">
+        <Cpu className="w-3 h-3" />
+        <span>Auto Mode</span>
+      </div>
     </div>
   );
 
@@ -434,15 +300,6 @@ export default function Sarathi() {
             {s.icon}
             <span>{s.text}</span>
           </button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap justify-center gap-2 mt-2">
-        {MODELS.map(m => (
-          <div key={m.id} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/10 text-xs text-muted-foreground">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ background: m.color }} />
-            {m.name}
-          </div>
         ))}
       </div>
     </>
@@ -482,44 +339,13 @@ export default function Sarathi() {
                 ))}
             </div>
           </ScrollArea>
-
-          <div className="p-3 border-t border-border">
-            <p className="text-xs text-muted-foreground px-2 mb-2 flex items-center gap-1">
-              <Cpu className="w-3 h-3" /> Models ({MODELS.length} free)
-            </p>
-            <ScrollArea className="h-48">
-              {MODEL_GROUPS.map(group => (
-                <div key={group} className="mb-2">
-                  <p className="text-[9px] font-semibold text-primary/50 uppercase tracking-wider px-2 py-1">{group}</p>
-                  {MODELS.filter(m => m.group === group).map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => setSelectedModel(m)}
-                      className={`w-full flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-colors ${
-                        selectedModel.id === m.id
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:text-white hover:bg-white/5"
-                      }`}
-                    >
-                      <div className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold text-[8px] shrink-0" style={{ background: m.color }}>
-                        {m.icon}
-                      </div>
-                      <span className="truncate flex-1 text-left">{m.name}</span>
-                      <span className="text-[8px] shrink-0 opacity-50">{m.tag}</span>
-                      {selectedModel.id === m.id && <Check className="w-3 h-3 ml-1 shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </ScrollArea>
-          </div>
         </div>
 
         <div className="flex-1 min-w-0">
           <ChatInterface
             conversationId={conversationId}
             title="Sarathi Chat"
-            placeholder={`Ask anything (${selectedModel.name} selected)... ya image/PDF/PPT generate karo`}
+            placeholder="Ask anything... ya image/PDF/PPT generate karo"
             brandColor="primary"
             emptyStateContent={<EmptyState />}
             headerContent={<HeaderRight />}
@@ -528,8 +354,8 @@ export default function Sarathi() {
             onInitialMessageSent={() => setPendingMsg("")}
             enableImageGen={true}
             messageRenderer={messageRenderer}
-            systemPrompt={systemPrompt}
-            model={selectedModel.id}
+            systemPrompt={BASE_SYSTEM}
+            model="auto"
           />
         </div>
       </div>
