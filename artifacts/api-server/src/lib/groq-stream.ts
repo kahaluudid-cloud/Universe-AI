@@ -23,7 +23,8 @@ export const GROQ_MODELS: Record<string, { id: string; name: string; tag: string
   "groq:deepseek-r1":     { id: "deepseek-r1-distill-llama-70b",    name: "DeepSeek R1 (Groq)",    tag: "Reasoning" },
 };
 
-export const DEFAULT_GROQ_MODEL = "groq:llama3.3-70b";
+// 8B instant = 14,400 req/day (vs 70B which hits token limits faster)
+export const DEFAULT_GROQ_MODEL = "groq:llama3.1-8b";
 
 function getGroqModelId(modelKey: string): string {
   return GROQ_MODELS[modelKey]?.id ?? GROQ_MODELS[DEFAULT_GROQ_MODEL].id;

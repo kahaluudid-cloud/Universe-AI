@@ -177,6 +177,23 @@ async function* routeToModel(
   throw new Error(`Unknown model key: ${modelKey}`);
 }
 
+// ── Gemini multi-model rotation (sabka 1500 req/day alag hota hai) ───────────
+// Each model has its OWN 1500/day quota — rotating through all = 6000 req/day per key!
+const GEMINI_AUTO_ROTATION = [
+  "gemini:2.0-flash",       // 1500 req/day
+  "gemini:2.0-flash-lite",  // 1500 req/day (fastest, lightest)
+  "gemini:1.5-flash",       // 1500 req/day
+  "gemini:1.5-flash-8b",    // 1500 req/day (smallest)
+];
+
+// ── Groq high-limit models (sabse jyada req/day) ─────────────────────────────
+const GROQ_HIGH_LIMIT_ROTATION = [
+  "groq:llama3.1-8b",  // 14,400 req/day
+  "groq:gemma2-9b",    // 14,400 req/day
+  "groq:llama3-8b",    // 14,400 req/day
+  "groq:llama3.3-70b", // fewer but higher quality fallback
+];
+
 async function* hybridStream(
   convType: string,
   systemPrompt: string,
@@ -185,7 +202,7 @@ async function* hybridStream(
   log: typeof console,
   maxTokens = 2048
 ): AsyncGenerator<string> {
-  // ── If user picked a specific model, use it directly — no fallback ─────────
+  // ── Specific model chosen — use directly ────────────────────────────────────
   if (modelKey && modelKey !== "auto") {
     try {
       yield* routeToModel(modelKey, systemPrompt, chatMessages, log, maxTokens);
@@ -195,67 +212,69 @@ async function* hybridStream(
     }
   }
 
-  const isManish = convType === "manish";
-
-  // Provider order: Manish = Groq → OpenRouter → Gemini
-  //                 Sarathi = OpenRouter → Groq → Gemini
-  // Flat fallback chain
+  // ── AUTO MODE — Priority by max free requests/day ───────────────────────────
+  // 1st: Gemini Direct (1500 req/day × 4 models = 6000/day per key)
+  // 2nd: Groq 8B (14,400 req/day — ultra fast)
+  // 3rd: OpenRouter (variable, ~200-500/day — last resort)
   const errors: string[] = [];
 
-  // 1. Groq (Manish) / OpenRouter (Sarathi)
-  if (isManish && hasKeys("GROQ_KEY")) {
-    try {
-      yield* await withKeyRotation("GROQ_KEY", (key) =>
-        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL, maxTokens))
-      );
-      return;
-    } catch (err) {
-      errors.push(`Groq: ${err}`);
-      log.warn?.("Groq exhausted, trying next provider...");
-    }
-  }
-  if (!isManish && hasOpenRouter()) {
-    try {
-      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, DEFAULT_OR_MODEL, maxTokens);
-      return;
-    } catch (err) {
-      errors.push(`OpenRouter: ${err}`);
-      log.warn?.("OpenRouter exhausted, trying next provider...");
-    }
-  }
-
-  // 2. OpenRouter (Manish) / Groq (Sarathi)
-  if (isManish && hasOpenRouter()) {
-    try {
-      yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, "or:llama-70b", maxTokens);
-      return;
-    } catch (err) {
-      errors.push(`OpenRouter: ${err}`);
-      log.warn?.("OpenRouter exhausted, trying Gemini...");
-    }
-  }
-  if (!isManish && hasKeys("GROQ_KEY")) {
-    try {
-      yield* await withKeyRotation("GROQ_KEY", (key) =>
-        Promise.resolve(streamGroq(key, systemPrompt, chatMessages, DEFAULT_GROQ_MODEL, maxTokens))
-      );
-      return;
-    } catch (err) {
-      errors.push(`Groq: ${err}`);
-      log.warn?.("Groq exhausted, trying Gemini...");
-    }
-  }
-
-  // 3. Gemini — last resort for both modes
+  // ── 1. Gemini Direct — highest quality, 1500/day per model ──────────────────
   if (hasKeys("GEMINI_KEY")) {
-    try {
-      yield* await withKeyRotation("GEMINI_KEY", (key) =>
-        Promise.resolve(streamGemini(key, systemPrompt, chatMessages, DEFAULT_GEMINI_MODEL, maxTokens))
-      );
-      return;
-    } catch (err) {
-      errors.push(`Gemini: ${err}`);
-      log.warn?.("Gemini exhausted too.");
+    for (const geminiModel of GEMINI_AUTO_ROTATION) {
+      try {
+        yield* await withKeyRotation("GEMINI_KEY", (key) =>
+          Promise.resolve(streamGemini(key, systemPrompt, chatMessages, geminiModel, maxTokens))
+        );
+        return;
+      } catch (err) {
+        const errMsg = String(err);
+        const isQuotaErr = errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429");
+        if (isQuotaErr) {
+          log.warn?.(`Gemini ${geminiModel} quota hit, trying next Gemini model...`);
+          errors.push(`Gemini(${geminiModel}): quota`);
+          continue; // try next Gemini model
+        }
+        errors.push(`Gemini(${geminiModel}): ${err}`);
+        break; // non-quota error, skip to next provider
+      }
+    }
+    log.warn?.("All Gemini models exhausted, trying Groq...");
+  }
+
+  // ── 2. Groq — 14,400 req/day for 8B models ──────────────────────────────────
+  if (hasKeys("GROQ_KEY")) {
+    for (const groqModel of GROQ_HIGH_LIMIT_ROTATION) {
+      try {
+        yield* await withKeyRotation("GROQ_KEY", (key) =>
+          Promise.resolve(streamGroq(key, systemPrompt, chatMessages, groqModel, maxTokens))
+        );
+        return;
+      } catch (err) {
+        const errMsg = String(err);
+        const isQuotaErr = errMsg.includes("rate_limit") || errMsg.includes("tokens per day") || errMsg.includes("429");
+        if (isQuotaErr) {
+          log.warn?.(`Groq ${groqModel} limit hit, trying next Groq model...`);
+          errors.push(`Groq(${groqModel}): quota`);
+          continue;
+        }
+        errors.push(`Groq(${groqModel}): ${err}`);
+        break;
+      }
+    }
+    log.warn?.("All Groq models exhausted, trying OpenRouter...");
+  }
+
+  // ── 3. OpenRouter — final fallback ──────────────────────────────────────────
+  if (hasOpenRouter()) {
+    const orFallbacks = [DEFAULT_OR_MODEL, "or:llama-8b", "or:mistral-7b", "or:qwen3-8b"];
+    for (const orModel of orFallbacks) {
+      try {
+        yield* streamOpenRouter(getOpenRouterKey(), systemPrompt, chatMessages, orModel, maxTokens);
+        return;
+      } catch (err) {
+        errors.push(`OpenRouter(${orModel}): ${err}`);
+        log.warn?.(`OpenRouter ${orModel} failed, trying next...`);
+      }
     }
   }
 
